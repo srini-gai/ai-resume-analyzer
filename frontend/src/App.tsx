@@ -56,6 +56,7 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("analysis");
   const [skillFilter, setSkillFilter] = useState<"all" | "matched" | "missing">("all");
   const [downloadingPdf, setDownloadingPdf] = useState(false);
+  const [downloadingDocx, setDownloadingDocx] = useState(false);
 
   const downloadOptimizedPdf = async () => {
     if (!file) { alert("Original resume file no longer available. Please re-upload."); return; }
@@ -80,6 +81,31 @@ export default function App() {
       setDownloadingPdf(false);
     }
   };
+  const downloadOptimizedDocx = async () => {
+    if (!result) return;
+    setDownloadingDocx(true);
+    try {
+      const response = await fetch(`${apiUrl}/api/v2/optimized-docx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ optimizedResume: result.optimizedResume }),
+      });
+      if (!response.ok) throw new Error("DOCX generation failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `ResumeIQ_Optimized_${(result.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_")}_${date}.docx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Could not generate Word document. " + (e instanceof Error ? e.message : ""));
+    } finally {
+      setDownloadingDocx(false);
+    }
+  };
+
   const loadingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -306,14 +332,24 @@ export default function App() {
                             Your resume structure preserved — only the language was improved.
                           </p>
                         </div>
-                        <button
-                          onClick={downloadOptimizedPdf}
-                          disabled={downloadingPdf || !file}
-                          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {downloadingPdf ? <LoaderCircle className="animate-spin" size={16} /> : <Download size={16} />}
-                          {downloadingPdf ? "Generating..." : "Download Optimized PDF"}
-                        </button>
+                        <div className="flex flex-wrap gap-2">
+                          <button
+                            onClick={downloadOptimizedPdf}
+                            disabled={downloadingPdf || !file}
+                            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                          >
+                            {downloadingPdf ? <LoaderCircle className="animate-spin" size={15} /> : <Download size={15} />}
+                            {downloadingPdf ? "Generating…" : "Download PDF"}
+                          </button>
+                          <button
+                            onClick={downloadOptimizedDocx}
+                            disabled={downloadingDocx}
+                            className="flex items-center gap-2 rounded-2xl border border-indigo-400/30 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
+                          >
+                            {downloadingDocx ? <LoaderCircle className="animate-spin" size={15} /> : <FileText size={15} />}
+                            {downloadingDocx ? "Generating…" : "Download Word"}
+                          </button>
+                        </div>
                       </div>
 
                       {/* Column headers */}
@@ -340,32 +376,34 @@ export default function App() {
 
                             <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-700/60">
                               {/* Original */}
-                              <div className="p-4">
+                              <div className="min-w-0 overflow-hidden p-4">
                                 {section.bullets.length > 0
-                                  ? <ul className="space-y-1.5">
+                                  ? <ul className="space-y-2">
                                       {section.bullets.map((b, i) => (
                                         <li key={i} className="flex gap-2 text-xs text-slate-500 dark:text-slate-400">
-                                          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
-                                          {b}
+                                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                          <span className="min-w-0 break-words">{b}</span>
                                         </li>
                                       ))}
                                     </ul>
-                                  : <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{section.originalContent}</p>
+                                  : <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400 break-words">{section.originalContent}</p>
                                 }
                               </div>
 
                               {/* Optimized — highlight new words in green */}
-                              <div className="p-4 bg-indigo-50/30 dark:bg-indigo-900/10">
+                              <div className="min-w-0 overflow-hidden p-4 bg-indigo-50/30 dark:bg-indigo-900/10">
                                 {section.rewrittenBullets.length > 0
-                                  ? <ul className="space-y-1.5">
+                                  ? <ul className="space-y-2">
                                       {section.rewrittenBullets.map((b, i) => (
                                         <li key={i} className="flex gap-2 text-xs">
-                                          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-indigo-400" />
-                                          <WordDiff original={section.bullets[i] ?? ""} revised={b} />
+                                          <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-indigo-400" />
+                                          <span className="min-w-0 break-words leading-relaxed">
+                                            <WordDiff original={section.bullets[i] ?? ""} revised={b} />
+                                          </span>
                                         </li>
                                       ))}
                                     </ul>
-                                  : <p className="text-xs leading-relaxed">
+                                  : <p className="text-xs leading-relaxed break-words">
                                       <WordDiff original={section.originalContent} revised={section.rewrittenContent} />
                                     </p>
                                 }

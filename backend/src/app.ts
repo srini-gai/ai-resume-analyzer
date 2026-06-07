@@ -8,6 +8,8 @@ import { analyzeResume } from "./analyzer.js";
 import { rewriteResume } from "./ai-rewriter.js";
 import { buildGapAnalysis } from "./gap-analyzer.js";
 import { editPdfInPlace } from "./pdf-editor.js";
+import { generateOptimizedDocx } from "./docx-generator.js";
+import type { OptimizedResume } from "./ai-rewriter.js";
 
 const maxBytes = Number(process.env.MAX_FILE_SIZE_MB || 5) * 1024 * 1024;
 const upload = multer({
@@ -21,7 +23,7 @@ app.set("trust proxy", 1);
 app.use(helmet());
 const allowedOrigins = process.env.CLIENT_ORIGIN?.split(",").map(o => o.trim()).filter(Boolean);
 app.use(cors({ origin: allowedOrigins?.length ? allowedOrigins : false }));
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "4mb" }));
 app.use("/api", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-7", legacyHeaders: false }));
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
@@ -69,6 +71,21 @@ app.post("/api/v2/optimized-pdf", upload.single("resume"), async (req, res, next
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.pdf"');
     return res.end(editedPdf);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// DOCX endpoint — accepts JSON body with the optimizedResume already computed
+// (avoids re-running the full analysis just for format conversion)
+app.post("/api/v2/optimized-docx", async (req, res, next) => {
+  try {
+    const body = req.body as { optimizedResume?: OptimizedResume };
+    if (!body.optimizedResume) return res.status(400).json({ message: "optimizedResume is required." });
+    const docxBuffer = await generateOptimizedDocx(body.optimizedResume);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.docx"');
+    return res.end(docxBuffer);
   } catch (error) {
     return next(error);
   }
