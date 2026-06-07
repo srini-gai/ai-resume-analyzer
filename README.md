@@ -80,3 +80,4 @@ Health check: /api/health
 - Require GitHub Actions checks before merging to `main`.
 - Upgrade from Render's free plan if cold-start latency is unacceptable.
 - Review rate limits and file-size limits for expected traffic.
+# auto-deploy enabled
