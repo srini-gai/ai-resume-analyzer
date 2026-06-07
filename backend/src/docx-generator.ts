@@ -1,62 +1,195 @@
 import * as docxLib from "docx";
 const {
   Document, Packer, Paragraph, TextRun,
-  AlignmentType, BorderStyle, TableRow, TableCell,
-  Table, WidthType, convertInchesToTwip,
+  AlignmentType, BorderStyle, TabStopType, TabStopPosition,
+  Table, TableRow, TableCell, WidthType, HeightRule,
+  convertInchesToTwip,
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 } = docxLib as any;
 import type { OptimizedResume, ResumeSection } from "./ai-rewriter.js";
 
-// ─── Design tokens (match premium feel) ──────────────────────────────────────
-const INDIGO   = "4338CA";
-const SLATE700 = "334155";
-const SLATE500 = "64748B";
-const SLATE100 = "F1F5F9";
-const WHITE    = "FFFFFF";
+// ─── Design palette (Executive CV) ───────────────────────────────────────────
+const C = {
+  navy:    "0F2A4D",   // deep navy — header & section titles
+  accent:  "B8860B",   // refined gold accent — divider & marks
+  body:    "2A2E33",   // body text — near-black slate
+  muted:   "6B7280",   // captions, dates
+  rule:    "C9A14A",   // gold rule lines
+  thinRule:"D8DEE9",   // light divider
+};
 
-// ─── Helper: thin horizontal rule ────────────────────────────────────────────
-function sectionRule(): unknown {
+const FONT = "Calibri";   // clean ATS-safe executive font
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function rn(text: string, opts: Record<string, unknown> = {}): unknown {
+  return new TextRun({ text, font: FONT, color: C.body, size: 20, ...opts });
+}
+
+function divider(color: string = C.rule, size = 12): unknown {
   return new Paragraph({
-    border: { bottom: { color: "C7D2FE", size: 6, style: BorderStyle.SINGLE } },
-    spacing: { before: 0, after: 0 },
+    spacing: { before: 40, after: 80 },
+    border: { bottom: { color, size, style: BorderStyle.SINGLE } },
   });
 }
 
-// ─── Helper: section heading ──────────────────────────────────────────────────
 function sectionHeading(title: string): unknown {
   return new Paragraph({
-    spacing: { before: 240, after: 60 },
+    spacing: { before: 280, after: 80 },
+    border: { bottom: { color: C.thinRule, size: 6, style: BorderStyle.SINGLE } },
     children: [
       new TextRun({
         text: title.toUpperCase(),
+        font: FONT,
         bold: true,
-        size: 20,
-        color: INDIGO,
+        size: 22,            // 11pt
+        color: C.navy,
         characterSpacing: 60,
       }),
     ],
-    border: { bottom: { color: "C7D2FE", size: 4, style: BorderStyle.SINGLE } },
   });
 }
 
-// ─── Helper: bullet paragraph ─────────────────────────────────────────────────
-function bulletPara(text: string, isOptimized = false): unknown {
+function bullet(text: string): unknown {
   return new Paragraph({
-    spacing: { before: 40, after: 40 },
-    indent: { left: convertInchesToTwip(0.25), hanging: convertInchesToTwip(0.15) },
+    spacing: { before: 40, after: 80 },
+    indent: { left: convertInchesToTwip(0.28), hanging: convertInchesToTwip(0.18) },
     children: [
-      new TextRun({ text: "• ", color: isOptimized ? INDIGO : SLATE500, size: 19 }),
-      new TextRun({ text, color: SLATE700, size: 19 }),
+      new TextRun({ text: "▪  ", font: FONT, color: C.accent, size: 20, bold: true }),
+      rn(text),
     ],
   });
 }
 
-// ─── Helper: body paragraph ───────────────────────────────────────────────────
-function bodyPara(text: string): unknown {
+function paragraph(text: string): unknown {
   return new Paragraph({
-    spacing: { before: 40, after: 80 },
-    children: [new TextRun({ text, color: SLATE700, size: 19 })],
+    spacing: { before: 60, after: 100, line: 300 },
+    children: [rn(text)],
   });
+}
+
+// ─── Tightly-formatted skills table (two cols, no borders) ───────────────────
+function skillsTable(skills: string[]): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rows: any[] = [];
+  const NONE = { style: BorderStyle.NONE, size: 0, color: "FFFFFF" };
+  const cellBorders = { top: NONE, bottom: NONE, left: NONE, right: NONE };
+
+  for (let i = 0; i < skills.length; i += 2) {
+    const l = skills[i] ?? "";
+    const r = skills[i + 1] ?? "";
+    rows.push(new TableRow({
+      children: [
+        new TableCell({
+          width: { size: 50, type: WidthType.PERCENTAGE },
+          borders: cellBorders,
+          children: [new Paragraph({
+            spacing: { before: 20, after: 20 },
+            children: [
+              new TextRun({ text: "▪  ", font: FONT, color: C.accent, size: 20, bold: true }),
+              rn(l),
+            ],
+          })],
+        }),
+        new TableCell({
+          width: { size: 50, type: WidthType.PERCENTAGE },
+          borders: cellBorders,
+          children: [new Paragraph({
+            spacing: { before: 20, after: 20 },
+            children: r
+              ? [new TextRun({ text: "▪  ", font: FONT, color: C.accent, size: 20, bold: true }), rn(r)]
+              : [rn("")],
+          })],
+        }),
+      ],
+    }));
+  }
+
+  return new Table({
+    width: { size: 100, type: WidthType.PERCENTAGE },
+    rows,
+  });
+}
+
+// ─── Experience entry detector — splits an experience block into entries ─────
+// Heuristic: lines that look like "Role – Company" or "Company | Date" become
+// entry headers; subsequent bullets attach to that entry.
+interface ExpEntry {
+  title: string;
+  meta: string;   // optional secondary line
+  bullets: string[];
+}
+
+function parseExperience(section: ResumeSection): ExpEntry[] {
+  // If the section has clean bullets, treat the whole thing as one entry with
+  // bullets — we don't have entry boundaries detectable here.
+  if (section.rewrittenBullets.length > 0) {
+    return [{ title: "", meta: "", bullets: section.rewrittenBullets }];
+  }
+  // Fallback — split rewrittenContent
+  const bullets = section.rewrittenContent
+    .split(/\n+/)
+    .map(l => l.replace(/^[•▪◦\-*]\s*/, "").trim())
+    .filter(Boolean);
+  return [{ title: "", meta: "", bullets }];
+}
+
+// ─── Render an experience section ────────────────────────────────────────────
+function renderExperienceSection(section: ResumeSection): unknown[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: any[] = [sectionHeading(section.originalTitle)];
+  const entries = parseExperience(section);
+  for (const e of entries) {
+    if (e.title) {
+      out.push(new Paragraph({
+        spacing: { before: 100, after: 0 },
+        tabStops: [{ type: TabStopType.RIGHT, position: TabStopPosition.MAX }],
+        children: [
+          new TextRun({ text: e.title, font: FONT, bold: true, size: 22, color: C.navy }),
+          new TextRun({ text: `\t${e.meta}`, font: FONT, size: 19, color: C.muted, italics: true }),
+        ],
+      }));
+    }
+    for (const b of e.bullets) out.push(bullet(b));
+  }
+  return out;
+}
+
+// ─── Render education / certifications (preserve original line-by-line) ──────
+function renderListSection(section: ResumeSection): unknown[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const out: any[] = [sectionHeading(section.originalTitle)];
+  const lines = section.originalContent.split("\n").map(l => l.trim()).filter(Boolean);
+  for (const line of lines) {
+    out.push(new Paragraph({
+      spacing: { before: 60, after: 40 },
+      indent: { left: convertInchesToTwip(0.0) },
+      children: [
+        new TextRun({ text: "▪  ", font: FONT, color: C.accent, size: 20, bold: true }),
+        rn(line),
+      ],
+    }));
+  }
+  return out;
+}
+
+// ─── Render the summary section ──────────────────────────────────────────────
+function renderSummary(section: ResumeSection): unknown[] {
+  return [
+    sectionHeading(section.originalTitle),
+    paragraph(section.rewrittenContent || section.originalContent),
+  ];
+}
+
+// ─── Render skills as a two-column table ─────────────────────────────────────
+function renderSkillsSection(section: ResumeSection): unknown[] {
+  const skills = section.rewrittenBullets.length
+    ? section.rewrittenBullets
+    : section.rewrittenContent.split(/[•,|\n]+/).map(s => s.trim()).filter(Boolean);
+  if (skills.length === 0) {
+    return [sectionHeading(section.originalTitle), paragraph(section.rewrittenContent)];
+  }
+  return [sectionHeading(section.originalTitle), skillsTable(skills)];
 }
 
 // ─── Main generator ──────────────────────────────────────────────────────────
@@ -65,138 +198,127 @@ export async function generateOptimizedDocx(resume: OptimizedResume): Promise<Bu
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const children: any[] = [];
 
-  // ── Header: Name ──────────────────────────────────────────────────────────
+  // ── Header block ──────────────────────────────────────────────────────────
   const headerSection = resume.sections.find(s => s.type === "header");
   const headerLines = headerSection
-    ? headerSection.originalContent.split("\n").filter(Boolean)
+    ? headerSection.originalContent.split("\n").map(l => l.trim()).filter(Boolean)
     : [resume.candidateName];
 
-  const name = headerLines[0] ?? resume.candidateName;
-  const contactLines = headerLines.slice(1);
+  const fullName = headerLines[0] ?? resume.candidateName;
 
-  children.push(
-    new Paragraph({
-      spacing: { before: 0, after: 60 },
-      children: [new TextRun({ text: name, bold: true, size: 52, color: SLATE700 })],
-    })
-  );
+  // Try to detect a tagline / title line (second line if it's short and lacks digits/@)
+  let taglineIdx = -1;
+  if (headerLines[1]
+      && headerLines[1].length < 80
+      && !/[@\d]/.test(headerLines[1])
+      && !/\bemail\b|\bphone\b/i.test(headerLines[1])) {
+    taglineIdx = 1;
+  }
+  const tagline = taglineIdx > 0 ? headerLines[taglineIdx] : "";
+  const contactLines = headerLines.slice(1).filter((_, i) => i !== taglineIdx - 1);
 
-  if (contactLines.length > 0) {
-    children.push(
-      new Paragraph({
-        spacing: { before: 0, after: 0 },
-        children: [
-          new TextRun({
-            text: contactLines.join("  |  "),
-            size: 17,
-            color: SLATE500,
-          }),
-        ],
-      })
-    );
+  // ── Name (centered, large) ─
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 0, after: 40 },
+    children: [
+      new TextRun({
+        text: fullName.toUpperCase(),
+        font: FONT,
+        bold: true,
+        size: 44,                  // 22pt
+        color: C.navy,
+        characterSpacing: 80,
+      }),
+    ],
+  }));
+
+  // ── Tagline / title ─
+  if (tagline) {
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 80 },
+      children: [
+        new TextRun({
+          text: tagline,
+          font: FONT,
+          size: 22,                // 11pt
+          color: C.accent,
+          italics: true,
+          characterSpacing: 30,
+        }),
+      ],
+    }));
   }
 
-  children.push(sectionRule());
+  // ── Contact line (pipe-separated, centered) ─
+  if (contactLines.length > 0) {
+    const contactText = contactLines.join("  |  ");
+    children.push(new Paragraph({
+      alignment: AlignmentType.CENTER,
+      spacing: { before: 0, after: 120 },
+      children: [
+        new TextRun({ text: contactText, font: FONT, size: 18, color: C.muted }),
+      ],
+    }));
+  }
+
+  // ── Gold divider ─
+  children.push(divider(C.rule, 12));
 
   // ── Body sections ─────────────────────────────────────────────────────────
+  const order: ResumeSection["type"][] = [
+    "summary", "experience", "projects", "skills",
+    "education", "certifications", "other",
+  ];
+
   const bodySections = resume.sections.filter(s => s.type !== "header");
+  const orderedSections = [...bodySections].sort((a, b) => {
+    const ai = order.indexOf(a.type); const bi = order.indexOf(b.type);
+    return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
+  });
 
-  for (const section of bodySections) {
-    children.push(sectionHeading(section.originalTitle));
-
-    const hasBullets = section.rewrittenBullets.length > 0;
-
-    if (hasBullets) {
-      for (const bullet of section.rewrittenBullets) {
-        children.push(bulletPara(bullet, true));
-      }
+  for (const section of orderedSections) {
+    if (section.type === "summary") {
+      children.push(...renderSummary(section));
+    } else if (section.type === "experience" || section.type === "projects") {
+      children.push(...renderExperienceSection(section));
     } else if (section.type === "skills") {
-      // Skills: comma-separated on one line, or as pills
-      const skills = section.rewrittenBullets.length
-        ? section.rewrittenBullets
-        : section.rewrittenContent.split(/[•,\n]+/).map(s => s.trim()).filter(Boolean);
-
-      // Render in two-column table
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const rows: any[] = [];
-      for (let i = 0; i < skills.length; i += 2) {
-        rows.push(
-          new TableRow({
-            children: [
-              new TableCell({
-                width: { size: 50, type: WidthType.PERCENTAGE },
-                borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
-                children: [
-                  new Paragraph({
-                    spacing: { before: 40, after: 40 },
-                    children: [
-                      new TextRun({ text: `• ${skills[i] ?? ""}`, color: SLATE700, size: 18 }),
-                    ],
-                  }),
-                ],
-              }),
-              new TableCell({
-                width: { size: 50, type: WidthType.PERCENTAGE },
-                borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } },
-                children: [
-                  new Paragraph({
-                    spacing: { before: 40, after: 40 },
-                    children: [
-                      new TextRun({ text: skills[i + 1] ? `• ${skills[i + 1]}` : "", color: SLATE700, size: 18 }),
-                    ],
-                  }),
-                ],
-              }),
-            ],
-          })
-        );
-      }
-
-      if (rows.length > 0) {
-        children.push(
-          new Table({
-            width: { size: 100, type: WidthType.PERCENTAGE },
-            rows,
-          })
-        );
-      }
+      children.push(...renderSkillsSection(section));
     } else if (section.type === "education" || section.type === "certifications") {
-      // Preserve original line-by-line
-      for (const line of section.originalContent.split("\n").filter(Boolean)) {
-        children.push(
-          new Paragraph({
-            spacing: { before: 40, after: 20 },
-            children: [new TextRun({ text: line.trim(), color: SLATE700, size: 19 })],
-          })
-        );
-      }
+      children.push(...renderListSection(section));
     } else {
-      children.push(bodyPara(section.rewrittenContent));
+      children.push(sectionHeading(section.originalTitle));
+      children.push(paragraph(section.rewrittenContent));
     }
   }
 
-  // ── Footer note ───────────────────────────────────────────────────────────
-  children.push(new Paragraph({ spacing: { before: 400 } }));
-  children.push(
-    new Paragraph({
-      alignment: AlignmentType.CENTER,
-      children: [
-        new TextRun({
-          text: "Optimized by ResumeIQ • resumeanalyzer.pro",
-          size: 14,
-          color: "94A3B8",
-          italics: true,
-        }),
-      ],
-    })
-  );
+  // ── Footer divider + branding ─────────────────────────────────────────────
+  children.push(new Paragraph({ spacing: { before: 240 } }));
+  children.push(divider(C.thinRule, 4));
+  children.push(new Paragraph({
+    alignment: AlignmentType.CENTER,
+    spacing: { before: 40 },
+    children: [
+      new TextRun({
+        text: "Optimized by ResumeIQ  •  resumeanalyzer.pro",
+        font: FONT,
+        size: 14,
+        color: C.muted,
+        italics: true,
+        characterSpacing: 30,
+      }),
+    ],
+  }));
 
   const doc = new Document({
+    creator: "ResumeIQ",
+    title: `${fullName} — Optimized Resume`,
     styles: {
       default: {
         document: {
-          run: { font: "Calibri", size: 19, color: SLATE700 },
-          paragraph: { spacing: { line: 276 } },
+          run: { font: FONT, size: 20, color: C.body },
+          paragraph: { spacing: { line: 288 } },
         },
       },
     },
@@ -204,10 +326,10 @@ export async function generateOptimizedDocx(resume: OptimizedResume): Promise<Bu
       properties: {
         page: {
           margin: {
-            top: convertInchesToTwip(0.8),
-            bottom: convertInchesToTwip(0.8),
-            left: convertInchesToTwip(0.9),
-            right: convertInchesToTwip(0.9),
+            top:    convertInchesToTwip(0.7),
+            bottom: convertInchesToTwip(0.7),
+            left:   convertInchesToTwip(0.85),
+            right:  convertInchesToTwip(0.85),
           },
         },
       },

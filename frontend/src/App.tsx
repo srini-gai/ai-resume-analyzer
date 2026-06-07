@@ -354,24 +354,14 @@ export default function App() {
                             Your resume structure preserved — only the language was improved.
                           </p>
                         </div>
-                        <div className="flex flex-wrap gap-2">
-                          <button
-                            onClick={downloadOptimizedPdf}
-                            disabled={downloadingPdf || !file}
-                            className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-4 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {downloadingPdf ? <LoaderCircle className="animate-spin" size={15} /> : <Download size={15} />}
-                            {downloadingPdf ? "Generating…" : "Download PDF"}
-                          </button>
-                          <button
-                            onClick={downloadOptimizedDocx}
-                            disabled={downloadingDocx}
-                            className="flex items-center gap-2 rounded-2xl border border-indigo-400/30 bg-indigo-50 px-4 py-2.5 text-sm font-bold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-indigo-900/20 dark:text-indigo-300 dark:hover:bg-indigo-900/40"
-                          >
-                            {downloadingDocx ? <LoaderCircle className="animate-spin" size={15} /> : <FileText size={15} />}
-                            {downloadingDocx ? "Generating…" : "Download Word"}
-                          </button>
-                        </div>
+                        <button
+                          onClick={downloadOptimizedDocx}
+                          disabled={downloadingDocx}
+                          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {downloadingDocx ? <LoaderCircle className="animate-spin" size={16} /> : <Download size={16} />}
+                          {downloadingDocx ? "Generating…" : "Download Optimized Resume (.docx)"}
+                        </button>
                       </div>
 
                       {/* Column headers */}
