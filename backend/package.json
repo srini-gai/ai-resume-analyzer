@@ -18,6 +18,8 @@
     "helmet": "^8.0.0",
     "multer": "^2.0.1",
     "pdf-parse": "^1.1.1",
+    "pdf-lib": "^1.17.1",
+    "pdfjs-dist": "^4.0.379",
     "@anthropic-ai/sdk": "^0.39.0"
   },
   "devDependencies": {

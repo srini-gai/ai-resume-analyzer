@@ -2,11 +2,10 @@ import { useEffect, useState, useRef, type FormEvent } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   FileSearch, LoaderCircle, ShieldCheck, Sparkles, UploadCloud, X,
-  CheckCircle2, AlertCircle, FileText, Wand2,
+  CheckCircle2, AlertCircle, FileText, Wand2, Download,
 } from "lucide-react";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Results } from "./components/Results";
-import { ResumePDFDownloadLink } from "./components/pdf/ResumePDF";
 import { ReportPDFDownloadLink } from "./components/pdf/ReportPDF";
 import ResumeBuilder from "./pages/ResumeBuilder";
 import type { V2AnalysisResult } from "./types";
@@ -56,6 +55,31 @@ export default function App() {
   const [result, setResult] = useState<V2AnalysisResult | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>("analysis");
   const [skillFilter, setSkillFilter] = useState<"all" | "matched" | "missing">("all");
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
+
+  const downloadOptimizedPdf = async () => {
+    if (!file) { alert("Original resume file no longer available. Please re-upload."); return; }
+    setDownloadingPdf(true);
+    try {
+      const body = new FormData();
+      body.append("resume", file);
+      body.append("jobDescription", jobDescription);
+      const response = await fetch(`${apiUrl}/api/v2/optimized-pdf`, { method: "POST", body });
+      if (!response.ok) throw new Error("PDF generation failed");
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const date = new Date().toISOString().slice(0, 10);
+      a.download = `ResumeIQ_Optimized_${(result?.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_")}_${date}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      alert("Could not generate optimized PDF. " + (e instanceof Error ? e.message : ""));
+    } finally {
+      setDownloadingPdf(false);
+    }
+  };
   const loadingRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
@@ -282,7 +306,14 @@ export default function App() {
                             Your resume structure preserved — only the language was improved.
                           </p>
                         </div>
-                        <ResumePDFDownloadLink data={result.optimizedResume} />
+                        <button
+                          onClick={downloadOptimizedPdf}
+                          disabled={downloadingPdf || !file}
+                          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {downloadingPdf ? <LoaderCircle className="animate-spin" size={16} /> : <Download size={16} />}
+                          {downloadingPdf ? "Generating..." : "Download Optimized PDF"}
+                        </button>
                       </div>
 
                       {/* Column headers */}
