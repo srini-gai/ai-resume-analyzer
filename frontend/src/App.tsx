@@ -67,14 +67,31 @@ export default function App() {
       body.append("jobDescription", jobDescription);
       const response = await fetch(`${apiUrl}/api/v2/optimized-pdf`, { method: "POST", body });
       if (!response.ok) throw new Error("PDF generation failed");
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
+
+      const contentType = response.headers.get("content-type") ?? "";
       const date = new Date().toISOString().slice(0, 10);
-      a.download = `ResumeIQ_Optimized_${(result?.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_")}_${date}.pdf`;
-      a.click();
-      URL.revokeObjectURL(url);
+      const safeName = (result?.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_");
+      const filename = `ResumeIQ_Optimized_${safeName}_${date}.pdf`;
+
+      if (contentType.includes("application/pdf")) {
+        // PDF input — backend returned an edited PDF
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      } else {
+        // DOCX input — backend returned JSON, generate PDF on the client
+        const json = await response.json() as { useClientSide?: boolean; optimizedResume?: V2AnalysisResult["optimizedResume"] };
+        if (!json.useClientSide || !json.optimizedResume) throw new Error("Unexpected server response");
+        const { pdf } = await import("@react-pdf/renderer");
+        const { ResumePDFDocument } = await import("./components/pdf/ResumePDF");
+        const blob = await pdf(<ResumePDFDocument data={json.optimizedResume} />).toBlob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = filename; a.click();
+        URL.revokeObjectURL(url);
+      }
     } catch (e) {
       alert("Could not generate optimized PDF. " + (e instanceof Error ? e.message : ""));
     } finally {
@@ -127,8 +144,13 @@ export default function App() {
   const selectFile = (candidate?: File) => {
     setError("");
     if (!candidate) return;
-    if (candidate.type !== "application/pdf") return setError("Please upload a PDF resume.");
-    if (candidate.size > 5 * 1024 * 1024) return setError("PDF must be smaller than 5MB.");
+    const name = candidate.name.toLowerCase();
+    const ok = candidate.type === "application/pdf"
+      || candidate.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      || candidate.type === "application/msword"
+      || name.endsWith(".pdf") || name.endsWith(".docx") || name.endsWith(".doc");
+    if (!ok) return setError("Please upload a PDF or Word (.doc/.docx) resume.");
+    if (candidate.size > 5 * 1024 * 1024) return setError("File must be smaller than 5MB.");
     setFile(candidate);
   };
 
@@ -228,13 +250,13 @@ export default function App() {
             <div className={`${cardCls} p-6 h-fit`}>
               <form onSubmit={submit} className="space-y-5">
                 <div>
-                  <label className="mb-2 block text-sm font-semibold">Resume PDF</label>
+                  <label className="mb-2 block text-sm font-semibold">Resume file</label>
                   <label onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); selectFile(e.dataTransfer.files[0]); }}
                     className="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50 p-8 text-center transition hover:bg-indigo-100 hover:border-indigo-400 dark:border-indigo-500/40 dark:bg-indigo-500/5 dark:hover:bg-indigo-500/10">
                     <UploadCloud className="mb-3 text-indigo-500" size={32} />
                     <span className="font-semibold text-slate-800 dark:text-slate-100">{file ? file.name : "Drop your resume here"}</span>
-                    <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">PDF only, up to 5MB</span>
-                    <input className="hidden" type="file" accept=".pdf,application/pdf" onChange={e => selectFile(e.target.files?.[0])} />
+                    <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">PDF, DOC or DOCX · up to 5MB</span>
+                    <input className="hidden" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e => selectFile(e.target.files?.[0])} />
                   </label>
                 </div>
                 {file && <button type="button" onClick={() => setFile(null)} className="flex items-center gap-1 text-xs text-slate-500 hover:text-rose-500"><X size={13} /> Remove file</button>}
@@ -277,8 +299,8 @@ export default function App() {
                   <label onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); selectFile(e.dataTransfer.files[0]); }}
                     className="flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-indigo-400/50 bg-indigo-500/5 p-5 text-center transition hover:bg-indigo-500/10">
                     <UploadCloud className="mb-2 text-indigo-500" size={20} />
-                    <span className="text-sm font-semibold">{file ? file.name : "Drop resume PDF"}</span>
-                    <input className="hidden" type="file" accept=".pdf,application/pdf" onChange={e => selectFile(e.target.files?.[0])} />
+                    <span className="text-sm font-semibold">{file ? file.name : "Drop resume (PDF/DOCX)"}</span>
+                    <input className="hidden" type="file" accept=".pdf,.doc,.docx,application/pdf,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document" onChange={e => selectFile(e.target.files?.[0])} />
                   </label>
                 </div>
                 <textarea value={jobDescription} onChange={e => setJobDescription(e.target.value)} rows={5}

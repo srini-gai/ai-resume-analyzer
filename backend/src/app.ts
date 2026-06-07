@@ -3,19 +3,23 @@ import express, { type ErrorRequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import multer from "multer";
-import pdf from "pdf-parse";
 import { analyzeResume } from "./analyzer.js";
 import { rewriteResume } from "./ai-rewriter.js";
 import { buildGapAnalysis } from "./gap-analyzer.js";
 import { editPdfInPlace } from "./pdf-editor.js";
 import { generateOptimizedDocx } from "./docx-generator.js";
+import { parseResume, detectFormat, ACCEPTED_MIMETYPES } from "./resume-parser.js";
 import type { OptimizedResume } from "./ai-rewriter.js";
 
 const maxBytes = Number(process.env.MAX_FILE_SIZE_MB || 5) * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: maxBytes },
-  fileFilter: (_req, file, cb) => cb(null, file.mimetype === "application/pdf")
+  fileFilter: (_req, file, cb) => {
+    const accepted = ACCEPTED_MIMETYPES.includes(file.mimetype)
+      || /\.(pdf|docx?|DOCX?)$/i.test(file.originalname);
+    cb(null, accepted);
+  },
 });
 
 export const app = express();
@@ -27,57 +31,88 @@ app.use(express.json({ limit: "4mb" }));
 app.use("/api", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-7", legacyHeaders: false }));
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+
+// ─── Helper: parse uploaded resume (PDF or DOCX) ─────────────────────────────
+async function readResumeFromRequest(req: express.Request): Promise<{ text: string; format: "pdf" | "docx" | "doc" } | { error: string; status: number }> {
+  if (!req.file) return { error: "A resume file (PDF or Word) is required.", status: 400 };
+  const format = detectFormat(req.file.mimetype, req.file.originalname);
+  if (!format) return { error: "Unsupported file type. Please upload PDF, DOC, or DOCX.", status: 415 };
+  try {
+    const parsed = await parseResume(req.file.buffer, format);
+    if (!parsed.text.trim()) return { error: "No readable text was found in the file.", status: 422 };
+    return { text: parsed.text, format };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : "Failed to parse file.", status: 422 };
+  }
+}
+
+// ─── v1: legacy analyze (kept for backward compat) ───────────────────────────
 app.post("/api/analyze", upload.single("resume"), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "A PDF resume is required." });
+    const parsed = await readResumeFromRequest(req);
+    if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    const parsed = await pdf(req.file.buffer);
-    if (!parsed.text.trim()) return res.status(422).json({ message: "No readable text was found in the PDF." });
     return res.json(analyzeResume(parsed.text, jobDescription));
   } catch (error) {
     return next(error);
   }
 });
 
+// ─── v2: full analysis with rewrite + gap ────────────────────────────────────
 app.post("/api/v2/analyze", upload.single("resume"), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "A PDF resume is required." });
+    const parsed = await readResumeFromRequest(req);
+    if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    const parsed = await pdf(req.file.buffer);
-    if (!parsed.text.trim()) return res.status(422).json({ message: "No readable text was found in the PDF." });
     const baseResult = analyzeResume(parsed.text, jobDescription);
     const [optimizedResume, gapAnalysis] = await Promise.all([
       rewriteResume(parsed.text, jobDescription, baseResult),
       Promise.resolve(buildGapAnalysis(parsed.text, jobDescription, baseResult)),
     ]);
-    return res.json({ ...baseResult, optimizedResume, gapAnalysis });
+    return res.json({ ...baseResult, optimizedResume, gapAnalysis, inputFormat: parsed.format });
   } catch (error) {
     return next(error);
   }
 });
 
+// ─── v2: optimized PDF download ──────────────────────────────────────────────
+// If input is PDF → in-place text replacement, preserving original template
+// If input is DOCX/DOC → generate a clean PDF from the rewritten content
 app.post("/api/v2/optimized-pdf", upload.single("resume"), async (req, res, next) => {
   try {
-    if (!req.file) return res.status(400).json({ message: "A PDF resume is required." });
+    const parsed = await readResumeFromRequest(req);
+    if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    const parsed = await pdf(req.file.buffer);
-    if (!parsed.text.trim()) return res.status(422).json({ message: "No readable text was found in the PDF." });
     const baseResult = analyzeResume(parsed.text, jobDescription);
     const optimizedResume = await rewriteResume(parsed.text, jobDescription, baseResult);
-    const editedPdf = await editPdfInPlace(req.file.buffer, optimizedResume.sections);
+
+    let outputBuffer: Buffer;
+
+    if (parsed.format === "pdf" && req.file) {
+      // PDF input — edit in place to preserve original template
+      outputBuffer = await editPdfInPlace(req.file.buffer, optimizedResume.sections);
+    } else {
+      // DOCX/DOC input — return 200 with a flag telling frontend to generate client-side
+      // (frontend uses react-pdf to render from optimizedResume JSON)
+      return res.status(200).json({
+        useClientSide: true,
+        optimizedResume,
+        message: "For Word uploads, the PDF is generated on the client. Use the returned optimizedResume.",
+      });
+    }
+
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.pdf"');
-    return res.end(editedPdf);
+    return res.end(outputBuffer);
   } catch (error) {
     return next(error);
   }
 });
 
-// DOCX endpoint — accepts JSON body with the optimizedResume already computed
-// (avoids re-running the full analysis just for format conversion)
+// ─── v2: optimized DOCX download (works for any input format) ────────────────
 app.post("/api/v2/optimized-docx", async (req, res, next) => {
   try {
     const body = req.body as { optimizedResume?: OptimizedResume };
@@ -93,10 +128,10 @@ app.post("/api/v2/optimized-docx", async (req, res, next) => {
 
 const errorHandler: ErrorRequestHandler = (error, _req, res, _next) => {
   if (error instanceof multer.MulterError && error.code === "LIMIT_FILE_SIZE") {
-    res.status(413).json({ message: `PDF must be smaller than ${process.env.MAX_FILE_SIZE_MB || 5}MB.` });
+    res.status(413).json({ message: `File must be smaller than ${process.env.MAX_FILE_SIZE_MB || 5}MB.` });
     return;
   }
   console.error(error);
-  res.status(500).json({ message: "Unable to analyze the resume. Please try another PDF." });
+  res.status(500).json({ message: "Unable to process the resume. Please try again." });
 };
 app.use(errorHandler);
