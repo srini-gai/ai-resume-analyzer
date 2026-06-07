@@ -5,6 +5,8 @@ import helmet from "helmet";
 import multer from "multer";
 import pdf from "pdf-parse";
 import { analyzeResume } from "./analyzer.js";
+import { rewriteResume } from "./ai-rewriter.js";
+import { buildGapAnalysis } from "./gap-analyzer.js";
 
 const maxBytes = Number(process.env.MAX_FILE_SIZE_MB || 5) * 1024 * 1024;
 const upload = multer({
@@ -30,6 +32,24 @@ app.post("/api/analyze", upload.single("resume"), async (req, res, next) => {
     const parsed = await pdf(req.file.buffer);
     if (!parsed.text.trim()) return res.status(422).json({ message: "No readable text was found in the PDF." });
     return res.json(analyzeResume(parsed.text, jobDescription));
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.post("/api/v2/analyze", upload.single("resume"), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "A PDF resume is required." });
+    const jobDescription = String(req.body.jobDescription ?? "").trim();
+    if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
+    const parsed = await pdf(req.file.buffer);
+    if (!parsed.text.trim()) return res.status(422).json({ message: "No readable text was found in the PDF." });
+    const baseResult = analyzeResume(parsed.text, jobDescription);
+    const [optimizedResume, gapAnalysis] = await Promise.all([
+      rewriteResume(parsed.text, jobDescription, baseResult),
+      Promise.resolve(buildGapAnalysis(parsed.text, jobDescription, baseResult)),
+    ]);
+    return res.json({ ...baseResult, optimizedResume, gapAnalysis });
   } catch (error) {
     return next(error);
   }
