@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: resume-analyzer-api
+    runtime: node
+    plan: free
+    buildCommand: npm install && npm run build -w backend
+    startCommand: npm run start -w backend
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: MAX_FILE_SIZE_MB
+        value: "5"
