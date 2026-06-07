@@ -1,7 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { AnalysisResult } from "./analyzer.js";
 
-// ─── Shared types (must mirror frontend/src/types.ts) ─────────────────────────
+// ─── Shared types ─────────────────────────────────────────────────────────────
 
 export type LayoutType = "single-column" | "two-column" | "executive";
 export type SectionType =
@@ -34,18 +34,13 @@ export interface OptimizedResume {
 }
 
 // ─── PDF artifact cleaner ─────────────────────────────────────────────────────
-// pdf-parse sometimes mis-decodes special bullet/icon glyphs (▶ ● ✓) as a
-// stray uppercase letter (commonly "V", "l", "n") that splits the first word.
-// Pattern: "VS upervised" → "Supervised", "VD irected" → "Directed"
-//          "VIn creased" → "Increased",  "lD rove" → "Drove"
+// pdf-parse sometimes mis-decodes bullet glyphs as a stray char that splits words
+// e.g. "VS upervised" → "Supervised", "VIn creased" → "Increased"
 
 function fixPdfArtifact(line: string): string {
-  // Match: single stray char + capital-start fragment + space + lowercase continuation
-  // e.g.  "VS upervised"  →  first="S"   rest="upervised"  →  "Supervised"
-  //       "VIn creased"   →  first="In"  rest="creased"    →  "Increased"
   return line.replace(
     /^[A-Za-z]([A-Z][a-z]*)\s+([a-z]\S.*)$/,
-    (_match, firstFrag: string, restFrag: string) => firstFrag + restFrag
+    (_m, frag: string, rest: string) => frag + rest
   ).trim();
 }
 
@@ -53,37 +48,65 @@ function cleanResumeText(raw: string): string {
   return raw
     .split("\n")
     .map(line => {
-      const trimmed = line.trim();
-      // Only apply artifact fix to non-heading lines of reasonable length
-      if (trimmed.length > 4 && !/^[A-Z\s&/]{3,40}$/.test(trimmed)) {
-        return fixPdfArtifact(trimmed);
-      }
-      return trimmed;
+      const t = line.trim();
+      if (t.length > 4 && !/^[A-Z\s&/:-]{3,60}$/.test(t)) return fixPdfArtifact(t);
+      return t;
     })
     .join("\n");
 }
 
-// ─── Section heading patterns ─────────────────────────────────────────────────
+// ─── Section heading classifier ───────────────────────────────────────────────
+//
+// DESIGN PRINCIPLE: match by keyword-contains so lines like
+//   "SUMMARY - PROFESSIONAL EXPERIENCE:"
+//   "TECHNICAL SKILLS:"
+//   "WORK EXPERIENCE & CAREER HISTORY:"
+// are all correctly classified.
+//
+// A heading must:
+//   1. Be short (≤ 80 chars)
+//   2. Not end with a full stop
+//   3. Contain a known section keyword (takes priority) OR be ALL-CAPS
+//   4. NOT look like a regular sentence (too many words = sentence)
 
-const SECTION_PATTERNS: Array<{ re: RegExp; type: SectionType }> = [
-  { re: /^(PROFESSIONAL\s+)?SUMM?ARY$|^PROFILE$|^OBJECTIVE$|^ABOUT\s+ME$/i, type: "summary" },
-  { re: /^(PROFESSIONAL|WORK|RELEVANT)?\s*(EXPERIENCE|EMPLOYMENT|HISTORY)$/i, type: "experience" },
-  { re: /^(TECHNICAL\s+|CORE\s+)?SKILLS?$|^COMPETENC(Y|IES)$|^EXPERTISE$|^TECHNOLOGIES$/i, type: "skills" },
-  { re: /^EDUCATION$|^ACADEMIC\s+BACKGROUND$/i, type: "education" },
-  { re: /^CERTIFIC(ATION|ATE)S?$|^LICEN[CS]ES?$|^CREDENTIALS$/i, type: "certifications" },
-  { re: /^(KEY\s+|PERSONAL\s+)?PROJECTS?$/i, type: "projects" },
+interface SectionKeyword { keywords: string[]; type: SectionType }
+
+const SECTION_KEYWORDS: SectionKeyword[] = [
+  { keywords: ["SUMMARY", "PROFILE", "OBJECTIVE", "ABOUT ME"], type: "summary" },
+  { keywords: ["EXPERIENCE", "EMPLOYMENT", "CAREER HISTORY", "WORK HISTORY"], type: "experience" },
+  { keywords: ["SKILL", "COMPETENC", "EXPERTISE", "TECHNOLOG"], type: "skills" },
+  { keywords: ["EDUCATION", "ACADEMIC", "QUALIFICATION", "SCHOOLING"], type: "education" },
+  { keywords: ["CERTIF", "LICEN", "CREDENTIAL", "ACCREDIT"], type: "certifications" },
+  { keywords: ["PROJECT"], type: "projects" },
 ];
 
 function classifyHeading(line: string): SectionType | null {
-  const trimmed = line.trim();
-  if (trimmed.length < 3 || trimmed.length > 50) return null;
-  for (const { re, type } of SECTION_PATTERNS) {
-    if (re.test(trimmed)) return type;
+  const raw = line.trim();
+  // Length guard: too short is noise, too long is a sentence
+  if (raw.length < 3 || raw.length > 80) return null;
+  // Real sentences end with a period — headings don't
+  if (raw.endsWith(".")) return null;
+  // Strip trailing punctuation to normalise "SKILLS:" → "SKILLS"
+  const clean = raw.replace(/[\s:;|\-–—]+$/, "").trim();
+  const upper = clean.toUpperCase();
+  // Count words — more than 10 = likely a sentence, not a heading
+  if (clean.split(/\s+/).length > 10) return null;
+
+  // Priority 1: known keyword match
+  for (const { keywords, type } of SECTION_KEYWORDS) {
+    for (const kw of keywords) {
+      if (upper.startsWith(kw) || upper.includes(` ${kw}`) || upper === kw) {
+        return type;
+      }
+    }
   }
-  // ALL-CAPS short line = likely section heading
-  if (/^[A-Z][A-Z\s&/\-]{2,35}$/.test(trimmed) && trimmed.split(/\s+/).length <= 5) {
+
+  // Priority 2: ALL-CAPS short line with no digits (subsections like "ECC SECURITY")
+  // Return "other" so they become sections in the output (preserves document structure)
+  if (/^[A-Z][A-Z\s&/\-–]{2,50}$/.test(clean) && clean.split(/\s+/).length <= 7) {
     return "other";
   }
+
   return null;
 }
 
@@ -91,16 +114,15 @@ function classifyHeading(line: string): SectionType | null {
 
 function detectLayout(resumeText: string): DetectedLayout {
   const lines = resumeText.split("\n").map(l => l.trim()).filter(Boolean);
+  const head5 = lines.slice(0, 5).join(" ");
 
-  const hasEmail = /[\w.]+@[\w.]+/.test(lines.slice(0, 5).join(" "));
-  const hasPhone = /\+?\d[\d\s\-()]{7,}/.test(lines.slice(0, 5).join(" "));
+  const hasEmail = /[\w.]+@[\w.]+/.test(head5);
+  const hasPhone = /\+?\d[\d\s\-()]{7,}/.test(head5);
   const hasPipes = resumeText.includes(" | ") || resumeText.includes(" │ ");
   const shortLineRatio = lines.filter(l => l.length < 35).length / Math.max(lines.length, 1);
 
-  const firstLineWords = (lines[0] ?? "").split(/\s+/).length;
-  const isExecutive = (hasEmail || hasPhone) && firstLineWords <= 5;
+  const isExecutive = (hasEmail || hasPhone) && (lines[0] ?? "").split(/\s+/).length <= 5;
   const isTwoCol = hasPipes || shortLineRatio > 0.6;
-
   const type: LayoutType = isExecutive ? "executive" : isTwoCol ? "two-column" : "single-column";
 
   const sectionOrder: SectionType[] = ["header"];
@@ -108,59 +130,63 @@ function detectLayout(resumeText: string): DetectedLayout {
     const t = classifyHeading(line);
     if (t && t !== "header" && !sectionOrder.includes(t)) sectionOrder.push(t);
   }
-
   return { type, sectionOrder, headerStyle: isExecutive ? "inline-contact" : "left-aligned" };
 }
 
-// ─── Section extractor ────────────────────────────────────────────────────────
+// ─── Bullet extractor ─────────────────────────────────────────────────────────
+//
+// Three strategies in order of reliability:
+//   1. Explicit bullet chars (•, -, *, ▪ etc)       → PDF-sourced documents
+//   2. Lines starting with a capital, ≥ 30 chars     → Word-sourced documents
+//   3. Split on newlines as a fallback
 
-function extractBulletsFromContent(contentLines: string[]): string[] {
-  // Strategy 1: explicit bullet characters
-  const explicit = contentLines
-    .map(l => l.trim())
-    .filter(l => /^[•\-*▪◦➤→]\s/.test(l) || /^\d+\.\s/.test(l))
-    .map(l => l.replace(/^[•\-*▪◦➤→]\s*|\d+\.\s*/, "").trim())
+function extractBulletsFromContent(lines: string[]): string[] {
+  const clean = lines.map(l => l.trim()).filter(Boolean);
+
+  // Strategy 1: explicit markers
+  const explicit = clean
+    .filter(l => /^[•\-*▪◦➤→·]\s/.test(l) || /^\d+\.\s/.test(l))
+    .map(l => l.replace(/^[•\-*▪◦➤→·]\s*|\d+\.\s*/, "").trim())
     .filter(Boolean);
   if (explicit.length > 0) return explicit;
 
-  // Strategy 2: lines that start with a capital letter and are sentence-length
-  // (common when pdf-parse strips bullet chars)
-  const sentenceLines = contentLines
-    .map(l => l.trim())
-    .filter(l => l.length > 20 && /^[A-Z]/.test(l) && !classifyHeading(l));
-  return sentenceLines;
+  // Strategy 2: Word doc paragraphs (substantial lines, start with capital)
+  // Exclude lines that look like section headings
+  const paras = clean.filter(
+    l => l.length >= 20 && /^[A-Z]/.test(l) && !classifyHeading(l)
+  );
+  if (paras.length > 0) return paras;
+
+  // Strategy 3: all non-empty lines
+  return clean.filter(l => l.length >= 5);
 }
 
-function extractSkillsFromContent(contentLines: string[]): string[] {
-  const allText = contentLines.join(" | ");
-  // Skills are usually comma-separated, pipe-separated, or newline-separated
+function extractSkillsFromContent(lines: string[]): string[] {
+  const allText = lines.join(", ");
   const candidates = allText
-    .split(/[,|•\n\/]+/)
+    .split(/[,|•\n;\/]+/)
     .map(s => s.trim())
-    .filter(s => s.length > 1 && s.length < 40 && !/^\d+$/.test(s));
+    .filter(s => s.length > 1 && s.length < 60 && !/^\d+$/.test(s));
   return [...new Set(candidates)].filter(Boolean);
 }
+
+// ─── Section extractor ────────────────────────────────────────────────────────
 
 function extractSections(resumeText: string): ResumeSection[] {
   const cleaned = cleanResumeText(resumeText);
   const lines = cleaned.split("\n");
   const sections: ResumeSection[] = [];
 
-  // Header block: everything before first real section heading
-  let firstSectionIdx = lines.findIndex(
-    l => classifyHeading(l.trim()) !== null
-  );
-  if (firstSectionIdx === -1) firstSectionIdx = Math.min(6, lines.length);
+  // Header = everything before the first classified heading
+  let firstSectionIdx = lines.findIndex(l => classifyHeading(l.trim()) !== null);
+  if (firstSectionIdx === -1) firstSectionIdx = Math.min(8, lines.length);
 
   const headerContent = lines.slice(0, firstSectionIdx).join("\n").trim();
   if (headerContent) {
     sections.push({
-      type: "header",
-      originalTitle: "HEADER",
-      originalContent: headerContent,
-      rewrittenContent: headerContent,
-      bullets: [],
-      rewrittenBullets: [],
+      type: "header", originalTitle: "HEADER",
+      originalContent: headerContent, rewrittenContent: headerContent,
+      bullets: [], rewrittenBullets: [],
     });
   }
 
@@ -178,12 +204,9 @@ function extractSections(resumeText: string): ResumeSection[] {
       : extractBulletsFromContent(nonEmpty);
 
     sections.push({
-      type: currentType,
-      originalTitle: currentTitle,
-      originalContent: content,
-      rewrittenContent: content,
-      bullets,
-      rewrittenBullets: [...bullets],
+      type: currentType, originalTitle: currentTitle,
+      originalContent: content, rewrittenContent: content,
+      bullets, rewrittenBullets: [...bullets],
     });
   };
 
@@ -212,18 +235,19 @@ const WEAK_VERBS: Record<string, string> = {
   "used": "Leveraged", "got": "Achieved", "ran": "Operated",
   "handled": "Managed", "wrote": "Authored", "fixed": "Resolved",
   "changed": "Transformed", "created": "Developed", "supported": "Accelerated",
+  "led": "Spearheaded", "managed": "Orchestrated",
 };
 
-function strengthenBullet(bullet: string, jdKeywords: string[]): string {
-  let text = fixPdfArtifact(bullet.trim()); // clean any remaining artifacts
-  // Only replace if the opening verb is genuinely weak
+function strengthenBullet(b: string, jdKeywords: string[]): string {
+  let text = fixPdfArtifact(b.trim());
   for (const [weak, strong] of Object.entries(WEAK_VERBS)) {
-    const re = new RegExp(`^${weak}\\b`, "i");
-    if (re.test(text)) { text = text.replace(re, strong); break; }
+    if (new RegExp(`^${weak}\\b`, "i").test(text)) {
+      text = text.replace(new RegExp(`^${weak}\\b`, "i"), strong);
+      break;
+    }
   }
-  // Add a JD-relevant metric if no number exists
-  if (!/\d/.test(text) && text.length > 25 && jdKeywords.length > 0) {
-    const kw = jdKeywords[Math.floor(Math.random() * Math.min(jdKeywords.length, 5))] ?? "";
+  if (!/\d/.test(text) && text.length > 30 && jdKeywords.length > 0) {
+    const kw = jdKeywords[Math.floor(Math.random() * Math.min(5, jdKeywords.length))];
     if (kw) text = `${text}, driving measurable improvement in ${kw}`;
   }
   return text;
@@ -231,7 +255,7 @@ function strengthenBullet(bullet: string, jdKeywords: string[]): string {
 
 function rewriteSectionContent(
   section: ResumeSection,
-  jobDescription: string,
+  _jobDescription: string,
   analysis: AnalysisResult,
   jdKeywords: string[]
 ): ResumeSection {
@@ -242,17 +266,21 @@ function rewriteSectionContent(
     const missing = analysis.missingSkills.slice(0, 2);
     const rewrittenContent =
       `Accomplished professional with deep expertise in ${topSkills}. ` +
-      (missing.length ? `Currently expanding capabilities in ${missing.join(" and ")} to drive end-to-end delivery. ` : "") +
-      `Track record of ${jdKeywords.slice(0, 3).join(", ")} in high-growth, collaborative environments, consistently exceeding stakeholder expectations.`;
+      (missing.length ? `Actively expanding capabilities in ${missing.join(" and ")} to drive end-to-end value. ` : "") +
+      `Proven track record of ${jdKeywords.slice(0, 3).join(", ")} in high-growth, collaborative environments, consistently exceeding stakeholder expectations.`;
     return { ...section, rewrittenContent, rewrittenBullets: [] };
   }
 
-  if (section.type === "experience" || section.type === "projects") {
+  if (section.type === "experience" || section.type === "projects" || section.type === "other") {
+    if (section.bullets.length === 0) {
+      // No bullets extracted — preserve original, just clean up wording
+      return { ...section, rewrittenContent: section.originalContent };
+    }
     const rewrittenBullets = section.bullets.map(b => strengthenBullet(b, jdKeywords));
-    // Weave in missing skills naturally on first 2 bullets
+    // Weave in up to 2 missing skills naturally
     analysis.missingSkills.slice(0, 2).forEach((skill, i) => {
-      if (rewrittenBullets[i] && !rewrittenBullets[i].toLowerCase().includes(skill)) {
-        rewrittenBullets[i] = `${rewrittenBullets[i].replace(/\.$/, "")}, utilising ${skill} best practices`;
+      if (rewrittenBullets[i] && !rewrittenBullets[i].toLowerCase().includes(skill.toLowerCase())) {
+        rewrittenBullets[i] = `${rewrittenBullets[i].replace(/[,.]?\s*$/, "")}, leveraging ${skill}`;
       }
     });
     const rewrittenContent = rewrittenBullets.map(b => `• ${b}`).join("\n");
@@ -260,13 +288,14 @@ function rewriteSectionContent(
   }
 
   if (section.type === "skills") {
-    const existing = section.bullets.length ? section.bullets : section.originalContent.split(/[,|•\n]+/).map(s => s.trim()).filter(Boolean);
+    const existing = section.bullets.length
+      ? section.bullets
+      : section.originalContent.split(/[,|•\n;]+/).map(s => s.trim()).filter(Boolean);
     const merged = [...new Set([...existing, ...analysis.matchedSkills, ...analysis.missingSkills.slice(0, 3)])].filter(Boolean);
-    const rewrittenContent = merged.join(" • ");
-    return { ...section, rewrittenContent, rewrittenBullets: merged };
+    return { ...section, rewrittenContent: merged.join(" • "), rewrittenBullets: merged };
   }
 
-  // education, certifications, other — preserve verbatim
+  // education, certifications — preserve verbatim
   return { ...section, rewrittenContent: section.originalContent };
 }
 
@@ -285,9 +314,7 @@ function jdKeywordsFrom(jd: string): string[] {
   const stop = new Set(["the","and","for","with","that","this","have","from","they","will",
     "your","been","more","were","about","their","into","you","are","our","all","has",
     "can","not","but","its","was","also","each","such","both","must","when","than"]);
-  return [...new Set(
-    jd.toLowerCase().split(/\W+/).filter(w => w.length > 4 && !stop.has(w))
-  )].slice(0, 10);
+  return [...new Set(jd.toLowerCase().split(/\W+/).filter(w => w.length > 4 && !stop.has(w)))].slice(0, 10);
 }
 
 // ─── Rule-based full rewrite ──────────────────────────────────────────────────
@@ -311,7 +338,6 @@ function ruleBasedRewrite(
   const summary = summarySection?.rewrittenContent ?? "";
   const experienceBullets = expSection?.rewrittenBullets ?? [];
   const skills = skillsSection?.rewrittenBullets.length ? skillsSection.rewrittenBullets : analysis.matchedSkills;
-
   const fullRewrittenText = sections.map(s =>
     s.type === "header" ? s.originalContent : [s.originalTitle, s.rewrittenContent].join("\n")
   ).join("\n\n");
@@ -319,7 +345,7 @@ function ruleBasedRewrite(
   return { candidateName, layout, sections, summary, experienceBullets, skills, fullRewrittenText };
 }
 
-// ─── AI rewrite (Claude) ──────────────────────────────────────────────────────
+// ─── AI rewrite (Claude claude-haiku-4-5) ────────────────────────────────────────────────
 
 export async function rewriteResume(
   resumeText: string,
@@ -340,36 +366,35 @@ export async function rewriteResume(
   const sectionJson = rewritable.map(s => ({
     type: s.type,
     title: s.originalTitle,
-    content: s.originalContent.slice(0, 800),
-    bullets: s.bullets.slice(0, 8),
+    content: s.originalContent.slice(0, 600),
+    bullets: s.bullets.slice(0, 10),
   }));
 
-  const prompt = `You are an elite executive resume writer. Rewrite each resume section below to better match the job description.
+  const prompt = `You are an elite executive resume writer. Rewrite each section below to better match the job description.
 
 STRICT RULES:
-1. Preserve EXACT section titles and section order
-2. Keep ALL factual details (company names, dates, degrees, metrics) — only improve language
-3. Replace weak verbs (was, did, helped, worked, used) with power verbs (Spearheaded, Orchestrated, Delivered, Drove, Engineered, Championed)
-4. Naturally incorporate these matched skills: ${analysis.matchedSkills.join(", ")}
-5. Weave in these missing skills where truthful: ${analysis.missingSkills.slice(0, 4).join(", ")}
-6. For experience bullets: add quantified outcomes (%, $, headcount, time-to-market) where plausible
-7. Summary: 3 punchy sentences — strength → differentiation → value proposition
-8. Return ONLY valid JSON array — no markdown, no code blocks
+1. Preserve EXACT section titles and order
+2. Keep ALL facts (names, dates, metrics, technologies) — only improve language
+3. Replace weak verbs with power verbs (Spearheaded, Orchestrated, Delivered, Drove, Engineered)
+4. Inject matched skills naturally: ${analysis.matchedSkills.join(", ")}
+5. Weave in missing skills where truthful: ${analysis.missingSkills.slice(0, 4).join(", ")}
+6. Add quantified outcomes (%, $, headcount) where plausible
+7. Return ONLY valid JSON array — no markdown, no code blocks
 
-Job Description (excerpt):
-${jobDescription.slice(0, 1000)}
+Job Description:
+${jobDescription.slice(0, 800)}
 
-Sections to rewrite:
+Sections:
 ${JSON.stringify(sectionJson, null, 2)}
 
-Return a JSON array with exactly ${rewritable.length} objects:
-[{ "type": "...", "title": "...", "rewrittenContent": "...", "rewrittenBullets": ["..."] }]
-rewrittenBullets = individual bullet strings without bullet char (for experience/skills/projects), else []`;
+Return JSON array with ${rewritable.length} objects:
+[{"type":"...","title":"...","rewrittenContent":"...","rewrittenBullets":["..."]}]
+rewrittenBullets = individual bullet strings (no bullet char) for experience/skills/projects/other, else []`;
 
   try {
     const message = await client.messages.create({
       model: "claude-haiku-4-5",
-      max_tokens: 3500,
+      max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
 
