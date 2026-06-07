@@ -89,12 +89,20 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
     set("education", edu);
   };
 
+  const experienceBullets = data.experience.flatMap(e => e.bullets).filter(Boolean);
   const previewData: OptimizedResume = {
     candidateName: data.name || "Your Name",
+    layout: { type: "single-column", sectionOrder: ["header","summary","experience","skills","education"], headerStyle: "left-aligned" },
+    sections: [
+      { type: "summary", originalTitle: "PROFESSIONAL SUMMARY", originalContent: data.summary, rewrittenContent: data.summary, bullets: [], rewrittenBullets: [] },
+      { type: "experience", originalTitle: "EXPERIENCE", originalContent: experienceBullets.join("\n"), rewrittenContent: experienceBullets.join("\n"), bullets: experienceBullets, rewrittenBullets: experienceBullets },
+      { type: "skills", originalTitle: "SKILLS", originalContent: data.skills.join(", "), rewrittenContent: data.skills.join(", "), bullets: data.skills, rewrittenBullets: data.skills },
+      { type: "education", originalTitle: "EDUCATION", originalContent: data.education.map(e => `${e.degree} — ${e.institution} (${e.year})`).join("\n"), rewrittenContent: data.education.map(e => `${e.degree} — ${e.institution} (${e.year})`).join("\n"), bullets: [], rewrittenBullets: [] },
+    ],
     summary: data.summary || "Your professional summary will appear here.",
-    experienceBullets: data.experience.flatMap(e => e.bullets).filter(Boolean),
+    experienceBullets,
     skills: data.skills,
-    fullRewrittenText: [data.name, data.summary, ...data.experience.flatMap(e => e.bullets)].join("\n"),
+    fullRewrittenText: [data.name, data.summary, ...experienceBullets].join("\n"),
   };
 
   const steps = [

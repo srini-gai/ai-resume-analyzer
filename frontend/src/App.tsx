@@ -11,6 +11,25 @@ import { ReportPDFDownloadLink } from "./components/pdf/ReportPDF";
 import ResumeBuilder from "./pages/ResumeBuilder";
 import type { V2AnalysisResult } from "./types";
 
+// Inline word-level diff — highlights words that are new/changed in the revised text
+function WordDiff({ original, revised }: { original: string; revised: string }) {
+  const origWords = new Set(original.toLowerCase().split(/\s+/));
+  const tokens = revised.split(/(\s+)/);
+  return (
+    <>
+      {tokens.map((token, i) =>
+        token.trim() === "" ? (
+          <span key={i}>{token}</span>
+        ) : origWords.has(token.toLowerCase().replace(/[^a-z0-9]/g, "")) ? (
+          <span key={i} className="text-slate-700 dark:text-slate-300">{token}</span>
+        ) : (
+          <span key={i} className="rounded bg-emerald-100 px-0.5 font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">{token}</span>
+        )
+      )}
+    </>
+  );
+}
+
 const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
 const LOADING_STEPS = [
@@ -249,39 +268,80 @@ export default function App() {
                     </motion.div>
                   )}
 
-                  {/* Tab 2: Optimized Resume */}
+                  {/* Tab 2: Optimized Resume — side-by-side section diff */}
                   {activeTab === "optimized" && result.optimizedResume && (
                     <motion.div key="optimized" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="space-y-4">
-                      <div className={`${cardCls} p-5`}>
-                        <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider mb-1">Your resume has been rewritten to match this role</p>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Professional Summary</p>
-                        <p className="text-sm text-slate-700 dark:text-slate-300 leading-relaxed border-l-2 border-indigo-500 pl-3">{result.optimizedResume.summary}</p>
+
+                      {/* Header bar */}
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                            Detected layout: <span className="capitalize">{result.optimizedResume.layout?.type?.replace("-", " ") ?? "single column"}</span>
+                          </p>
+                          <p className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
+                            Your resume structure preserved — only the language was improved.
+                          </p>
+                        </div>
+                        <ResumePDFDownloadLink data={result.optimizedResume} />
                       </div>
 
-                      <div className={`${cardCls} p-5`}>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Optimized Experience Bullets</p>
-                        <ul className="space-y-2">
-                          {result.optimizedResume.experienceBullets.map((b, i) => (
-                            <li key={i} className="flex gap-2 text-sm text-slate-700 dark:text-slate-300">
-                              <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-indigo-500" />
-                              {b}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-
-                      <div className={`${cardCls} p-5`}>
-                        <p className="text-sm font-semibold text-slate-900 dark:text-white mb-3">Skills</p>
-                        <div className="flex flex-wrap gap-2">
-                          {result.optimizedResume.skills.map(s => (
-                            <span key={s} className="rounded-full bg-indigo-500/10 border border-indigo-400/20 px-3 py-1 text-xs font-medium text-indigo-600 dark:text-indigo-400">{s}</span>
-                          ))}
+                      {/* Column headers */}
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="rounded-xl bg-slate-100 dark:bg-slate-800 px-4 py-2 text-center text-xs font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400">
+                          Original
+                        </div>
+                        <div className="rounded-xl bg-indigo-50 dark:bg-indigo-900/30 px-4 py-2 text-center text-xs font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                          Optimized ✦
                         </div>
                       </div>
 
-                      <div className="text-center pt-2">
-                        <ResumePDFDownloadLink data={result.optimizedResume} />
-                      </div>
+                      {/* Per-section diff */}
+                      {result.optimizedResume.sections
+                        .filter(s => s.type !== "header")
+                        .map((section, idx) => (
+                          <div key={idx} className={`${cardCls} overflow-hidden`}>
+                            {/* Section title bar */}
+                            <div className="border-b border-slate-100 dark:border-slate-700/60 bg-slate-50 dark:bg-slate-800/50 px-5 py-2.5">
+                              <span className="text-xs font-bold uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                                {section.originalTitle}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 divide-x divide-slate-100 dark:divide-slate-700/60">
+                              {/* Original */}
+                              <div className="p-4">
+                                {section.bullets.length > 0
+                                  ? <ul className="space-y-1.5">
+                                      {section.bullets.map((b, i) => (
+                                        <li key={i} className="flex gap-2 text-xs text-slate-500 dark:text-slate-400">
+                                          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-slate-300 dark:bg-slate-600" />
+                                          {b}
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  : <p className="text-xs leading-relaxed text-slate-500 dark:text-slate-400">{section.originalContent}</p>
+                                }
+                              </div>
+
+                              {/* Optimized — highlight new words in green */}
+                              <div className="p-4 bg-indigo-50/30 dark:bg-indigo-900/10">
+                                {section.rewrittenBullets.length > 0
+                                  ? <ul className="space-y-1.5">
+                                      {section.rewrittenBullets.map((b, i) => (
+                                        <li key={i} className="flex gap-2 text-xs">
+                                          <span className="mt-1 size-1.5 shrink-0 rounded-full bg-indigo-400" />
+                                          <WordDiff original={section.bullets[i] ?? ""} revised={b} />
+                                        </li>
+                                      ))}
+                                    </ul>
+                                  : <p className="text-xs leading-relaxed">
+                                      <WordDiff original={section.originalContent} revised={section.rewrittenContent} />
+                                    </p>
+                                }
+                              </div>
+                            </div>
+                          </div>
+                        ))}
                     </motion.div>
                   )}
 
