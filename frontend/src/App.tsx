@@ -20,7 +20,8 @@ const LOADING_STEPS = [
   "Building gap analysis...",
 ];
 
-const cardCls = "rounded-3xl border border-white/10 bg-white/70 backdrop-blur-xl shadow-xl dark:bg-slate-900/50";
+// Light: solid white card with subtle shadow. Dark: deep navy card with border.
+const cardCls = "rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-700/60 dark:bg-slate-900";
 
 type View = "analyze" | "builder";
 type Tab = "analysis" | "optimized" | "report";
@@ -78,17 +79,16 @@ export default function App() {
     finally { setLoading(false); }
   };
 
-  const bgCls = dark
-    ? "bg-gradient-to-br from-slate-950 via-indigo-950/20 to-slate-950"
-    : "bg-gradient-to-br from-slate-50 to-indigo-50/30";
+  // Dark: deep navy. Light: pure white — no gray gradients.
+  const bgCls = dark ? "bg-[#07091a]" : "bg-white";
 
   if (view === "builder") {
     return (
       <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
-        <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(99,102,241,.18),transparent_35%),radial-gradient(circle_at_80%_25%,rgba(14,165,233,.12),transparent_30%)]" />
+        {dark && <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(99,102,241,.25),transparent_50%),radial-gradient(ellipse_at_80%_20%,rgba(139,92,246,.15),transparent_50%)]" />}
         <header className="relative mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
-          <div className="flex items-center gap-2 font-bold text-lg">
-            <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 text-white"><FileSearch size={20} /></span>
+          <div className="flex items-center gap-2 font-bold text-lg text-slate-900 dark:text-white">
+            <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30"><FileSearch size={20} /></span>
             ResumeIQ
           </div>
           <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
@@ -102,12 +102,12 @@ export default function App() {
 
   return (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_20%_10%,rgba(99,102,241,.18),transparent_35%),radial-gradient(circle_at_80%_25%,rgba(14,165,233,.12),transparent_30%)]" />
+      {dark && <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(99,102,241,.25),transparent_50%),radial-gradient(ellipse_at_80%_20%,rgba(139,92,246,.15),transparent_50%)]" />}
 
       {/* Nav */}
       <header className="relative mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
-        <div className="flex items-center gap-2 font-bold text-lg">
-          <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-cyan-400 text-white"><FileSearch size={20} /></span>
+        <div className="flex items-center gap-2 font-bold text-lg text-slate-900 dark:text-white">
+          <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30"><FileSearch size={20} /></span>
           ResumeIQ
         </div>
         <div className="flex items-center gap-3">
@@ -122,14 +122,19 @@ export default function App() {
       <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-8">
         {!result && (
           <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} className="mx-auto mb-10 max-w-3xl text-center">
-            <div className="mb-4 inline-flex items-center gap-2 rounded-full border border-indigo-500/20 bg-indigo-500/10 px-4 py-2 text-xs font-bold uppercase tracking-widest text-indigo-500">
+            <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-50 px-4 py-2 text-xs font-bold uppercase tracking-widest text-indigo-600 dark:bg-indigo-500/10 dark:text-indigo-400 dark:border-indigo-500/20">
               <Sparkles size={14} /> Smart career intelligence
             </div>
-            <h1 className="text-4xl font-black tracking-tight sm:text-6xl">Turn your resume into a <span className="bg-gradient-to-r from-indigo-500 to-violet-500 bg-clip-text text-transparent">stronger match.</span></h1>
-            <p className="mx-auto mt-5 max-w-2xl text-slate-600 dark:text-slate-400">Upload your resume and target job description for AI-powered rewriting, gap analysis, and ATS optimization.</p>
-            <div className="mt-5 flex flex-wrap justify-center gap-2">
+            <h1 className="text-4xl font-black tracking-tight text-slate-900 dark:text-white sm:text-6xl">
+              Turn your resume into a{" "}
+              <span className="bg-gradient-to-r from-indigo-500 via-violet-500 to-purple-500 bg-clip-text text-transparent">stronger match.</span>
+            </h1>
+            <p className="mx-auto mt-5 max-w-2xl text-base text-slate-600 dark:text-slate-400">
+              Upload your resume and target job description for AI-powered rewriting, gap analysis, and ATS optimization.
+            </p>
+            <div className="mt-6 flex flex-wrap justify-center gap-2">
               {["AI-Powered Rewrite", "Gap Analysis", "ATS Optimization"].map(f => (
-                <span key={f} className="rounded-full border border-indigo-400/20 bg-indigo-500/5 px-3 py-1.5 text-xs font-semibold text-indigo-600 dark:text-indigo-400">✦ {f}</span>
+                <span key={f} className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 dark:border-indigo-500/20 dark:bg-indigo-500/10 dark:text-indigo-400">✦ {f}</span>
               ))}
             </div>
           </motion.div>
@@ -156,10 +161,10 @@ export default function App() {
                 <div>
                   <label className="mb-2 block text-sm font-semibold">Resume PDF</label>
                   <label onDragOver={e => e.preventDefault()} onDrop={e => { e.preventDefault(); selectFile(e.dataTransfer.files[0]); }}
-                    className="flex cursor-pointer flex-col items-center rounded-2xl border border-dashed border-indigo-400/50 bg-indigo-500/5 p-7 text-center transition hover:bg-indigo-500/10">
-                    <UploadCloud className="mb-3 text-indigo-500" />
-                    <span className="font-semibold">{file ? file.name : "Drop your resume here"}</span>
-                    <span className="mt-1 text-xs text-slate-500">PDF only, up to 5MB</span>
+                    className="flex cursor-pointer flex-col items-center rounded-2xl border-2 border-dashed border-indigo-300 bg-indigo-50 p-8 text-center transition hover:bg-indigo-100 hover:border-indigo-400 dark:border-indigo-500/40 dark:bg-indigo-500/5 dark:hover:bg-indigo-500/10">
+                    <UploadCloud className="mb-3 text-indigo-500" size={32} />
+                    <span className="font-semibold text-slate-800 dark:text-slate-100">{file ? file.name : "Drop your resume here"}</span>
+                    <span className="mt-1 text-xs text-slate-500 dark:text-slate-400">PDF only, up to 5MB</span>
                     <input className="hidden" type="file" accept=".pdf,application/pdf" onChange={e => selectFile(e.target.files?.[0])} />
                   </label>
                 </div>
@@ -168,7 +173,7 @@ export default function App() {
                   <label htmlFor="job" className="mb-2 block text-sm font-semibold">Target job description</label>
                   <textarea id="job" value={jobDescription} onChange={e => setJobDescription(e.target.value)} rows={8}
                     placeholder="Paste the role responsibilities, requirements, and preferred skills..."
-                    className="w-full resize-none rounded-2xl border border-slate-300 bg-white/50 p-4 text-sm outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-500/10 dark:border-white/10 dark:bg-slate-950/40" />
+                    className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm text-slate-900 placeholder-slate-400 outline-none transition focus:border-indigo-500 focus:bg-white focus:ring-4 focus:ring-indigo-500/10 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:border-indigo-500 dark:focus:bg-slate-800" />
                   <div className="mt-1 text-right text-xs text-slate-500">{jobDescription.length} characters</div>
                 </div>
                 <AnimatePresence>
@@ -208,7 +213,7 @@ export default function App() {
                   </label>
                 </div>
                 <textarea value={jobDescription} onChange={e => setJobDescription(e.target.value)} rows={5}
-                  className="w-full resize-none rounded-2xl border border-slate-300 bg-white/50 p-3 text-sm outline-none transition focus:border-indigo-500 dark:border-white/10 dark:bg-slate-950/40" />
+                  className="w-full resize-none rounded-2xl border border-slate-200 bg-slate-50 p-3 text-sm text-slate-900 outline-none transition focus:border-indigo-500 focus:bg-white dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
                 <button disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-4 py-3 text-sm font-bold text-white hover:brightness-110 transition disabled:opacity-70">
                   {loading ? <LoaderCircle className="animate-spin" size={16} /> : <Wand2 size={16} />} Re-analyze
                 </button>
@@ -224,7 +229,7 @@ export default function App() {
             {result && (
               <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}>
                 {/* Tabs */}
-                <div className="mb-4 flex gap-1 border-b border-slate-200 dark:border-white/10">
+                <div className="mb-4 flex gap-1 border-b-2 border-slate-100 dark:border-slate-700/60">
                   {(["analysis", "optimized", "report"] as Tab[]).map(tab => (
                     <button key={tab} onClick={() => setActiveTab(tab)}
                       className={`relative px-4 py-2.5 text-sm font-semibold capitalize transition ${activeTab === tab ? "text-indigo-600 dark:text-indigo-400" : "text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"}`}>

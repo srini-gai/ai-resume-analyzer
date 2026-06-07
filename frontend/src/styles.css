@@ -6,3 +6,11 @@
 html { scroll-behavior: smooth; }
 body { margin: 0; min-width: 320px; min-height: 100vh; }
 button, label { -webkit-tap-highlight-color: transparent; }
+
+/* Custom shadow utilities */
+.shadow-glow { box-shadow: 0 0 40px -10px rgba(99,102,241,0.3); }
+.shadow-card { box-shadow: 0 4px 24px -4px rgba(0,0,0,0.08), 0 1px 4px -1px rgba(0,0,0,0.06); }
+
+/* Dark mode base */
+html.dark body { background-color: #07091a; color: #f1f5f9; }
+html:not(.dark) body { background-color: #ffffff; color: #0f172a; }
