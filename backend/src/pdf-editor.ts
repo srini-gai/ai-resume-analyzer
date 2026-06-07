@@ -2,9 +2,15 @@ import { PDFDocument, StandardFonts, rgb } from "pdf-lib";
 import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
 import type { ResumeSection } from "./ai-rewriter.js";
 
-// Disable workers in Node.js
+// pdfjs-dist v4: workerSrc must be a string/URL (not false/null).
+// Resolve the worker file relative to this module's location at runtime.
+// In Docker: import.meta.url = file:///app/backend/dist/pdf-editor.js
+// => ../../node_modules/pdfjs-dist/... = /app/node_modules/pdfjs-dist/...
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-(pdfjsLib as any).GlobalWorkerOptions.workerSrc = false;
+(pdfjsLib as any).GlobalWorkerOptions.workerSrc = new URL(
+  "../../node_modules/pdfjs-dist/legacy/build/pdf.worker.mjs",
+  import.meta.url
+).href;
 
 interface PdfTextItem {
   str: string;
