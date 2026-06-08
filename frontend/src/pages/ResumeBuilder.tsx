@@ -1,8 +1,10 @@
 import { useState, KeyboardEvent } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ArrowLeft, ArrowRight, Plus, X, Check } from "lucide-react";
-import { ResumePDFDownloadLink } from "../components/pdf/ResumePDF";
-import type { OptimizedResume } from "../types";
+import { ArrowLeft, ArrowRight, Plus, X, Check, Sparkles, Loader2 } from "lucide-react";
+import { MeridianViewer, MeridianDownloadLink } from "../components/pdf/MeridianPDF";
+import type { MeridianData, SkillCategory } from "../components/pdf/MeridianPDF";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ExperienceEntry {
   company: string;
@@ -20,6 +22,7 @@ interface EducationEntry {
 
 interface BuilderData {
   name: string;
+  jobTitle: string;
   email: string;
   phone: string;
   location: string;
@@ -27,59 +30,94 @@ interface BuilderData {
   website: string;
   summary: string;
   experience: ExperienceEntry[];
-  skills: string[];
+  skillCategories: SkillCategory[];
   education: EducationEntry[];
   certifications: string[];
 }
 
-const STEPS = ["Personal Info", "Summary", "Experience", "Skills", "Education", "Preview & Export"];
+// ─── Constants ────────────────────────────────────────────────────────────────
 
-const SUGGESTION_CHIPS = [
-  "Results-driven professional with a track record of delivering impactful solutions",
-  "Passionate about leveraging technology to solve complex business challenges",
-  "Collaborative leader who thrives in fast-paced, cross-functional environments",
-];
+const STEPS = ["Personal Info", "Summary", "Experience", "Skills", "Education & Certs", "Preview & Export"];
+
+const SKILL_CATEGORY_LABELS = [
+  "Technical Skills", "Domain Skills", "Tools & Platforms", "Soft Skills",
+] as const;
+
+const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
 
 const defaultEntry = (): ExperienceEntry => ({
   company: "", role: "", startDate: "", endDate: "", bullets: ["", "", ""],
 });
 const defaultEdu = (): EducationEntry => ({ institution: "", degree: "", year: "" });
+const defaultCategories = (): SkillCategory[] =>
+  SKILL_CATEGORY_LABELS.map(label => ({ label, skills: [] }));
 
-const inputCls = "w-full rounded-xl border border-slate-300 bg-white/60 px-4 py-2.5 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-slate-800/60 dark:text-white transition";
+const inputCls =
+  "w-full rounded-xl border border-slate-300 bg-white/60 px-4 py-2.5 text-sm outline-none " +
+  "focus:border-indigo-500 focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 " +
+  "dark:bg-slate-800/60 dark:text-white transition";
 const labelCls = "block text-xs font-semibold text-slate-600 dark:text-slate-400 mb-1";
+
+// ─── AI-assist helpers ────────────────────────────────────────────────────────
+
+async function fetchAiSummary(
+  name: string, jobTitle: string,
+  experience: ExperienceEntry[], categories: SkillCategory[]
+): Promise<string> {
+  const skills = categories.flatMap(c => c.skills).slice(0, 8);
+  const res = await fetch(`${apiUrl}/api/v2/ai-assist/summary`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, currentRole: jobTitle, experience, skills }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const json = await res.json() as { summary: string };
+  return json.summary ?? "";
+}
+
+async function fetchAiBullet(bullet: string, role: string, company: string): Promise<string> {
+  const res = await fetch(`${apiUrl}/api/v2/ai-assist/bullet`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bullet, role, company }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  const json = await res.json() as { improved: string };
+  return json.improved ?? bullet;
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
   const [step, setStep] = useState(0);
   const [data, setData] = useState<BuilderData>({
-    name: "", email: "", phone: "", location: "", linkedin: "", website: "",
+    name: "", jobTitle: "", email: "", phone: "",
+    location: "", linkedin: "", website: "",
     summary: "",
     experience: [defaultEntry()],
-    skills: [],
+    skillCategories: defaultCategories(),
     education: [defaultEdu()],
     certifications: [],
   });
-  const [skillInput, setSkillInput] = useState("");
+
+  // Per-category skill inputs
+  const [catInputs, setCatInputs] = useState<string[]>(["", "", "", ""]);
   const [certInput, setCertInput] = useState("");
+
+  // AI loading states
+  const [summarizing, setSummarizing] = useState(false);
+  const [summaryError, setSummaryError] = useState("");
+  const [rewritingBullet, setRewritingBullet] = useState<string | null>(null); // "expIdx-bulletIdx"
+  const [bulletError, setBulletError] = useState("");
+
+  // ─ State helpers ────────────────────────────────────────────────────────────
 
   const set = <K extends keyof BuilderData>(key: K, val: BuilderData[K]) =>
     setData(d => ({ ...d, [key]: val }));
 
-  const addSkill = (s: string) => {
-    const trimmed = s.trim();
-    if (trimmed && !data.skills.includes(trimmed)) set("skills", [...data.skills, trimmed]);
-    setSkillInput("");
-  };
-  const removeSkill = (s: string) => set("skills", data.skills.filter(x => x !== s));
-
-  const addCert = (s: string) => {
-    const trimmed = s.trim();
-    if (trimmed && !data.certifications.includes(trimmed)) set("certifications", [...data.certifications, trimmed]);
-    setCertInput("");
-  };
-
   const updateExp = (i: number, field: keyof ExperienceEntry, val: string | [string, string, string]) => {
     const exp = [...data.experience];
-    exp[i] = { ...exp[i], [field]: val };
+    exp[i] = { ...exp[i], [field]: val } as ExperienceEntry;
     set("experience", exp);
   };
 
@@ -89,36 +127,100 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
     set("education", edu);
   };
 
-  const experienceBullets = data.experience.flatMap(e => e.bullets).filter(Boolean);
-  const previewData: OptimizedResume = {
-    candidateName: data.name || "Your Name",
-    layout: { type: "single-column", sectionOrder: ["header","summary","experience","skills","education"], headerStyle: "left-aligned" },
-    sections: [
-      { type: "summary", originalTitle: "PROFESSIONAL SUMMARY", originalContent: data.summary, rewrittenContent: data.summary, bullets: [], rewrittenBullets: [] },
-      { type: "experience", originalTitle: "EXPERIENCE", originalContent: experienceBullets.join("\n"), rewrittenContent: experienceBullets.join("\n"), bullets: experienceBullets, rewrittenBullets: experienceBullets },
-      { type: "skills", originalTitle: "SKILLS", originalContent: data.skills.join(", "), rewrittenContent: data.skills.join(", "), bullets: data.skills, rewrittenBullets: data.skills },
-      { type: "education", originalTitle: "EDUCATION", originalContent: data.education.map(e => `${e.degree} — ${e.institution} (${e.year})`).join("\n"), rewrittenContent: data.education.map(e => `${e.degree} — ${e.institution} (${e.year})`).join("\n"), bullets: [], rewrittenBullets: [] },
-    ],
-    summary: data.summary || "Your professional summary will appear here.",
-    experienceBullets,
-    skills: data.skills,
-    fullRewrittenText: [data.name, data.summary, ...experienceBullets].join("\n"),
+  const addSkillToCategory = (catIdx: number) => {
+    const val = catInputs[catIdx]?.trim() ?? "";
+    if (!val) return;
+    const cats = data.skillCategories.map((c, i) =>
+      i === catIdx && !c.skills.includes(val) ? { ...c, skills: [...c.skills, val] } : c
+    );
+    set("skillCategories", cats);
+    setCatInputs(prev => prev.map((v, i) => (i === catIdx ? "" : v)));
   };
 
+  const removeSkillFromCategory = (catIdx: number, skill: string) => {
+    const cats = data.skillCategories.map((c, i) =>
+      i === catIdx ? { ...c, skills: c.skills.filter(s => s !== skill) } : c
+    );
+    set("skillCategories", cats);
+  };
+
+  const addCert = (s: string) => {
+    const t = s.trim();
+    if (t && !data.certifications.includes(t)) set("certifications", [...data.certifications, t]);
+    setCertInput("");
+  };
+
+  // ─ AI actions ───────────────────────────────────────────────────────────────
+
+  const handleAiSummary = async () => {
+    setSummarizing(true); setSummaryError("");
+    try {
+      const text = await fetchAiSummary(data.name, data.jobTitle, data.experience, data.skillCategories);
+      set("summary", text);
+    } catch {
+      setSummaryError("AI assist unavailable — please check your connection or API key.");
+    } finally { setSummarizing(false); }
+  };
+
+  const handleAiBullet = async (expIdx: number, bulletIdx: number) => {
+    const key = `${expIdx}-${bulletIdx}`;
+    const exp = data.experience[expIdx];
+    if (!exp) return;
+    const bullet = exp.bullets[bulletIdx];
+    if (!bullet?.trim()) { setBulletError("Enter a bullet first."); return; }
+    setRewritingBullet(key); setBulletError("");
+    try {
+      const improved = await fetchAiBullet(bullet, exp.role, exp.company);
+      const newBullets = [...exp.bullets] as [string, string, string];
+      newBullets[bulletIdx] = improved;
+      updateExp(expIdx, "bullets", newBullets);
+    } catch {
+      setBulletError("AI assist unavailable. Try again or edit manually.");
+    } finally { setRewritingBullet(null); }
+  };
+
+  // ─ Derived PDF data ──────────────────────────────────────────────────────────
+
+  const meridianData: MeridianData = {
+    name: data.name || "Your Name",
+    jobTitle: data.jobTitle,
+    email: data.email, phone: data.phone,
+    location: data.location, linkedin: data.linkedin, website: data.website,
+    summary: data.summary,
+    experience: data.experience,
+    skillCategories: data.skillCategories,
+    education: data.education,
+    certifications: data.certifications,
+  };
+
+  const pdfFilename = `${(data.name || "Resume").replace(/\s+/g, "_")}_ResumeIQ.pdf`;
+
+  // ─ Step panels ──────────────────────────────────────────────────────────────
+
   const steps = [
-    // Step 0: Personal Info
+
+    // ── STEP 0: Personal Info ──────────────────────────────────────────────────
     <div key={0} className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
-        {(["name", "email", "phone", "location", "linkedin", "website"] as const).map(field => (
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Full Name</label>
+          <input className={inputCls} value={data.name} onChange={e => set("name", e.target.value)} placeholder="Udayakumar Palli" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className={labelCls}>Job Title / Headline</label>
+          <input className={inputCls} value={data.jobTitle} onChange={e => set("jobTitle", e.target.value)} placeholder="SAP Security Consultant  |  21 Years Experience" />
+        </div>
+        {(["email", "phone", "location", "linkedin", "website"] as const).map(field => (
           <div key={field}>
             <label className={labelCls}>{field.charAt(0).toUpperCase() + field.slice(1)}</label>
-            <input className={inputCls} value={data[field] as string} onChange={e => set(field, e.target.value)} placeholder={field === "linkedin" ? "linkedin.com/in/you" : field === "website" ? "yoursite.com" : ""} />
+            <input className={inputCls} value={data[field]} onChange={e => set(field, e.target.value)}
+              placeholder={field === "linkedin" ? "linkedin.com/in/you" : field === "website" ? "yoursite.com" : ""} />
           </div>
         ))}
       </div>
     </div>,
 
-    // Step 1: Summary
+    // ── STEP 1: Summary ────────────────────────────────────────────────────────
     <div key={1} className="space-y-4">
       <div>
         <label className={labelCls}>Professional Summary</label>
@@ -127,25 +229,36 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
           rows={6}
           value={data.summary}
           onChange={e => set("summary", e.target.value)}
-          placeholder="Write 2-3 sentences about your expertise, accomplishments, and career goals..."
+          placeholder="Results-driven professional with proven expertise in… 2–3 sentences."
         />
-        <div className="mt-1 text-right text-xs text-slate-500">{data.summary.length} characters</div>
-      </div>
-      <div>
-        <p className="text-xs font-semibold text-slate-600 dark:text-slate-400 mb-2">Suggestions (click to append)</p>
-        <div className="flex flex-col gap-2">
-          {SUGGESTION_CHIPS.map((chip, i) => (
-            <button key={i} onClick={() => set("summary", data.summary + (data.summary ? " " : "") + chip)}
-              className="text-left rounded-xl border border-indigo-400/30 bg-indigo-500/5 px-3 py-2 text-xs text-indigo-600 hover:bg-indigo-500/10 dark:text-indigo-400 transition">
-              • {chip}
-            </button>
-          ))}
+        <div className="mt-1 flex items-center justify-between text-xs text-slate-500">
+          <span>{data.summary.length} characters</span>
         </div>
+      </div>
+
+      {/* AI-assist button */}
+      <div className="space-y-2">
+        <button
+          onClick={handleAiSummary}
+          disabled={summarizing}
+          className="flex items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50 transition"
+        >
+          {summarizing
+            ? <><Loader2 size={14} className="animate-spin" /> Writing…</>
+            : <><Sparkles size={14} /> ✦ Write with AI</>}
+        </button>
+        {summaryError && <p className="text-xs text-rose-500">{summaryError}</p>}
+        <p className="text-xs text-slate-500">AI will draft a 3-sentence summary based on your name, role, and entered experience.</p>
       </div>
     </div>,
 
-    // Step 2: Experience
+    // ── STEP 2: Experience ─────────────────────────────────────────────────────
     <div key={2} className="space-y-6">
+      {bulletError && (
+        <div className="rounded-xl bg-rose-50 border border-rose-200 px-4 py-2 text-xs text-rose-600 dark:bg-rose-900/20 dark:border-rose-800">
+          {bulletError}
+        </div>
+      )}
       {data.experience.map((exp, i) => (
         <div key={i} className="rounded-2xl border border-white/10 bg-white/40 dark:bg-slate-800/40 p-4 space-y-3">
           <div className="flex justify-between items-center">
@@ -157,58 +270,106 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
             )}
           </div>
           <div className="grid gap-3 sm:grid-cols-2">
-            <div><label className={labelCls}>Company</label><input className={inputCls} value={exp.company} onChange={e => updateExp(i, "company", e.target.value)} /></div>
-            <div><label className={labelCls}>Role</label><input className={inputCls} value={exp.role} onChange={e => updateExp(i, "role", e.target.value)} /></div>
-            <div><label className={labelCls}>Start Date</label><input className={inputCls} value={exp.startDate} onChange={e => updateExp(i, "startDate", e.target.value)} placeholder="Jan 2022" /></div>
-            <div><label className={labelCls}>End Date</label><input className={inputCls} value={exp.endDate} onChange={e => updateExp(i, "endDate", e.target.value)} placeholder="Present" /></div>
-          </div>
-          {([0, 1, 2] as const).map(bi => (
-            <div key={bi}>
-              <label className={labelCls}>Bullet {bi + 1}</label>
-              <input className={inputCls} value={exp.bullets[bi]} onChange={e => {
-                const newBullets = [...exp.bullets] as [string, string, string];
-                newBullets[bi] = e.target.value;
-                updateExp(i, "bullets", newBullets);
-              }} placeholder="Delivered X, resulting in Y% improvement..." />
+            <div>
+              <label className={labelCls}>Role Title</label>
+              <input className={inputCls} value={exp.role} onChange={e => updateExp(i, "role", e.target.value)} placeholder="SAP Security Consultant" />
             </div>
-          ))}
+            <div>
+              <label className={labelCls}>Company</label>
+              <input className={inputCls} value={exp.company} onChange={e => updateExp(i, "company", e.target.value)} placeholder="Infosys" />
+            </div>
+            <div>
+              <label className={labelCls}>Start Date</label>
+              <input className={inputCls} value={exp.startDate} onChange={e => updateExp(i, "startDate", e.target.value)} placeholder="Jan 2018" />
+            </div>
+            <div>
+              <label className={labelCls}>End Date</label>
+              <input className={inputCls} value={exp.endDate} onChange={e => updateExp(i, "endDate", e.target.value)} placeholder="Present" />
+            </div>
+          </div>
+          {([0, 1, 2] as const).map(bi => {
+            const bulletKey = `${i}-${bi}`;
+            const isRewriting = rewritingBullet === bulletKey;
+            return (
+              <div key={bi}>
+                <label className={labelCls}>Bullet {bi + 1}</label>
+                <div className="flex gap-2">
+                  <input
+                    className={`${inputCls} flex-1`}
+                    value={exp.bullets[bi]}
+                    onChange={e => {
+                      const newBullets = [...exp.bullets] as [string, string, string];
+                      newBullets[bi] = e.target.value;
+                      updateExp(i, "bullets", newBullets);
+                    }}
+                    placeholder="Implemented SAP GRC Access Control 12.0, reducing risk exposure by…"
+                  />
+                  <button
+                    onClick={() => { void handleAiBullet(i, bi); }}
+                    disabled={isRewriting || !exp.bullets[bi]?.trim()}
+                    title="✦ Rewrite bullet with AI"
+                    className="shrink-0 flex items-center justify-center rounded-xl border border-indigo-400/40 bg-indigo-500/10 px-2.5 text-indigo-600 hover:bg-indigo-500/20 disabled:opacity-40 transition"
+                  >
+                    {isRewriting ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
       ))}
-      <button onClick={() => set("experience", [...data.experience, defaultEntry()])}
-        className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-semibold">
+      <button
+        onClick={() => set("experience", [...data.experience, defaultEntry()])}
+        className="flex items-center gap-2 text-sm text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 font-semibold"
+      >
         <Plus size={16} /> Add Experience
       </button>
     </div>,
 
-    // Step 3: Skills
-    <div key={3} className="space-y-4">
-      <div>
-        <label className={labelCls}>Add Skills (press Enter or comma to add)</label>
-        <input className={inputCls} value={skillInput} onChange={e => setSkillInput(e.target.value)}
-          onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-            if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSkill(skillInput); }
-          }}
-          placeholder="e.g. React, TypeScript, Python..." />
-      </div>
-      <div className="flex flex-wrap gap-2">
-        {data.skills.map(skill => (
-          <span key={skill} className="flex items-center gap-1 rounded-full bg-indigo-500/10 border border-indigo-400/30 px-3 py-1 text-xs text-indigo-600 dark:text-indigo-400 font-medium">
-            {skill}
-            <button onClick={() => removeSkill(skill)} className="hover:text-rose-500 transition"><X size={12} /></button>
-          </span>
-        ))}
-        {data.skills.length === 0 && <p className="text-xs text-slate-500">No skills added yet</p>}
-      </div>
+    // ── STEP 3: Skills ─────────────────────────────────────────────────────────
+    <div key={3} className="space-y-5">
+      <p className="text-xs text-slate-500">Add skills into each category. They'll appear in a grouped grid on your resume.</p>
+      {data.skillCategories.map((cat, catIdx) => (
+        <div key={catIdx} className="rounded-2xl border border-white/10 bg-white/40 dark:bg-slate-800/40 p-4 space-y-3">
+          <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-wider">{cat.label}</p>
+          <div className="flex gap-2">
+            <input
+              className={`${inputCls} flex-1`}
+              value={catInputs[catIdx] ?? ""}
+              placeholder={catIdx === 0 ? "e.g. SAP GRC, Python, React…" : catIdx === 1 ? "e.g. Risk Management, Compliance…" : catIdx === 2 ? "e.g. Docker, Jira, GitHub…" : "e.g. Leadership, Communication…"}
+              onChange={e => setCatInputs(prev => prev.map((v, i) => (i === catIdx ? e.target.value : v)))}
+              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+                if (e.key === "Enter" || e.key === ",") { e.preventDefault(); addSkillToCategory(catIdx); }
+              }}
+            />
+            <button
+              onClick={() => addSkillToCategory(catIdx)}
+              className="shrink-0 rounded-xl bg-indigo-600 px-3 py-2 text-white text-xs font-semibold hover:bg-indigo-700"
+            >
+              Add
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {cat.skills.map(skill => (
+              <span key={skill} className="flex items-center gap-1 rounded-full bg-indigo-500/10 border border-indigo-400/30 px-3 py-1 text-xs text-indigo-600 dark:text-indigo-400 font-medium">
+                {skill}
+                <button onClick={() => removeSkillFromCategory(catIdx, skill)} className="hover:text-rose-500 transition"><X size={11} /></button>
+              </span>
+            ))}
+            {cat.skills.length === 0 && <p className="text-xs text-slate-400">No {cat.label.toLowerCase()} added yet</p>}
+          </div>
+        </div>
+      ))}
     </div>,
 
-    // Step 4: Education + Certifications
+    // ── STEP 4: Education + Certifications ────────────────────────────────────
     <div key={4} className="space-y-6">
       <div>
         <p className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">Education</p>
         {data.education.map((edu, i) => (
           <div key={i} className="rounded-2xl border border-white/10 bg-white/40 dark:bg-slate-800/40 p-4 mb-3 grid gap-3 sm:grid-cols-3">
             <div><label className={labelCls}>Institution</label><input className={inputCls} value={edu.institution} onChange={e => updateEdu(i, "institution", e.target.value)} /></div>
-            <div><label className={labelCls}>Degree</label><input className={inputCls} value={edu.degree} onChange={e => updateEdu(i, "degree", e.target.value)} /></div>
+            <div><label className={labelCls}>Degree / Qualification</label><input className={inputCls} value={edu.degree} onChange={e => updateEdu(i, "degree", e.target.value)} /></div>
             <div><label className={labelCls}>Year</label><input className={inputCls} value={edu.year} onChange={e => updateEdu(i, "year", e.target.value)} placeholder="2020" /></div>
           </div>
         ))}
@@ -221,57 +382,33 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
         <div className="flex gap-2">
           <input className={`${inputCls} flex-1`} value={certInput} onChange={e => setCertInput(e.target.value)}
             onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => { if (e.key === "Enter") { e.preventDefault(); addCert(certInput); } }}
-            placeholder="AWS Solutions Architect..." />
+            placeholder="SAP Certified Technology Associate…" />
           <button onClick={() => addCert(certInput)} className="rounded-xl bg-indigo-600 px-4 py-2 text-white text-sm font-semibold hover:bg-indigo-700">Add</button>
         </div>
         <div className="flex flex-wrap gap-2 mt-2">
           {data.certifications.map(cert => (
             <span key={cert} className="flex items-center gap-1 rounded-full bg-indigo-500/10 border border-indigo-400/30 px-3 py-1 text-xs text-indigo-600 dark:text-indigo-400">
               {cert}
-              <button onClick={() => set("certifications", data.certifications.filter(c => c !== cert))} className="hover:text-rose-500"><X size={12} /></button>
+              <button onClick={() => set("certifications", data.certifications.filter(c => c !== cert))} className="hover:text-rose-500"><X size={11} /></button>
             </span>
           ))}
         </div>
       </div>
     </div>,
 
-    // Step 5: Preview + Export
-    <div key={5} className="space-y-6">
-      <div className="rounded-3xl border border-white/10 bg-white/60 dark:bg-slate-800/60 p-6 backdrop-blur-xl shadow-xl">
-        <h3 className="text-xl font-black text-slate-900 dark:text-white mb-1">{data.name || "Your Name"}</h3>
-        <p className="text-xs text-slate-500 mb-4">{data.email} {data.phone && `• ${data.phone}`} {data.location && `• ${data.location}`}</p>
-        {data.summary && (
-          <div className="mb-4">
-            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-1">Summary</p>
-            <p className="text-sm text-slate-700 dark:text-slate-300">{data.summary}</p>
-          </div>
-        )}
-        {data.experience.some(e => e.company || e.role) && (
-          <div className="mb-4">
-            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Experience</p>
-            {data.experience.filter(e => e.company || e.role).map((exp, i) => (
-              <div key={i} className="mb-3">
-                <p className="text-sm font-bold dark:text-white">{exp.role}{exp.company && ` at ${exp.company}`}</p>
-                <p className="text-xs text-slate-500">{exp.startDate}{exp.endDate && ` – ${exp.endDate}`}</p>
-                {exp.bullets.filter(Boolean).map((b, j) => <p key={j} className="text-sm text-slate-700 dark:text-slate-300">• {b}</p>)}
-              </div>
-            ))}
-          </div>
-        )}
-        {data.skills.length > 0 && (
-          <div>
-            <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider mb-2">Skills</p>
-            <div className="flex flex-wrap gap-1.5">
-              {data.skills.map(s => <span key={s} className="rounded-full bg-indigo-500/10 px-2.5 py-0.5 text-xs text-indigo-600 dark:text-indigo-400">{s}</span>)}
-            </div>
-          </div>
-        )}
+    // ── STEP 5: Preview & Export ───────────────────────────────────────────────
+    <div key={5} className="space-y-5">
+      <p className="text-xs text-slate-500">Live 2-page A4 preview. Scroll inside the viewer to see page 2.</p>
+      <div className="rounded-2xl overflow-hidden border border-slate-300/50 dark:border-white/10 shadow-xl">
+        <MeridianViewer data={meridianData} />
       </div>
-      <div className="text-center">
-        <ResumePDFDownloadLink data={previewData} />
+      <div className="flex justify-center pt-2">
+        <MeridianDownloadLink data={meridianData} filename={pdfFilename} />
       </div>
     </div>,
   ];
+
+  // ─ Render ────────────────────────────────────────────────────────────────────
 
   return (
     <div className="mx-auto max-w-3xl px-5 pb-16 pt-4">
@@ -279,7 +416,7 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
         <ArrowLeft size={16} /> Back to Analyzer
       </button>
 
-      {/* Progress bar */}
+      {/* Progress */}
       <div className="mb-8">
         <div className="flex justify-between text-xs font-semibold text-slate-500 mb-2">
           <span>{STEPS[step]}</span>
@@ -306,7 +443,7 @@ export default function ResumeBuilder({ onBack }: { onBack: () => void }) {
       <div className="rounded-3xl border border-white/10 bg-white/70 dark:bg-slate-900/50 backdrop-blur-xl shadow-xl p-6 mb-6">
         <h2 className="text-lg font-black text-slate-900 dark:text-white mb-5">{STEPS[step]}</h2>
         <AnimatePresence mode="wait">
-          <motion.div key={step} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.2 }}>
+          <motion.div key={step} initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} transition={{ duration: 0.18 }}>
             {steps[step]}
           </motion.div>
         </AnimatePresence>

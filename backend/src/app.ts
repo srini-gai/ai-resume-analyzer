@@ -3,6 +3,7 @@ import express, { type ErrorRequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import multer from "multer";
+import Anthropic from "@anthropic-ai/sdk";
 import { analyzeResume } from "./analyzer.js";
 import { rewriteResume } from "./ai-rewriter.js";
 import { buildGapAnalysis } from "./gap-analyzer.js";
@@ -155,6 +156,86 @@ app.post("/api/v2/optimized-docx", async (req, res, next) => {
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.docx"');
     return res.end(docxBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ─── AI Assist: 3-sentence professional summary ───────────────────────────────
+app.post("/api/v2/ai-assist/summary", async (req, res, next) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ message: "AI assist is not configured on this server." });
+    }
+    const { name, currentRole, experience, skills } = req.body as {
+      name?: string; currentRole?: string;
+      experience?: Array<{ role?: string; company?: string }>;
+      skills?: string[];
+    };
+
+    const expLine = (experience ?? [])
+      .slice(0, 3)
+      .map(e => [e.role, e.company].filter(Boolean).join(" at "))
+      .filter(Boolean)
+      .join("; ");
+    const skillLine = (skills ?? []).slice(0, 8).join(", ");
+
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 300,
+      messages: [{
+        role: "user",
+        content:
+          `Write a 3-sentence professional resume summary for ${name || "this candidate"}.\n` +
+          `Role: ${currentRole || "professional"}\n` +
+          `Recent experience: ${expLine || "various roles"}\n` +
+          `Key skills: ${skillLine || "various skills"}\n\n` +
+          `RULES:\n` +
+          `- Exactly 3 sentences, professional tone\n` +
+          `- Do NOT invent metrics, years, or facts not provided\n` +
+          `- Start with expertise area or seniority level\n` +
+          `- Return ONLY the summary text, no labels or quotes`,
+      }],
+    });
+
+    const text = (msg.content[0] as { type: string; text?: string })?.text ?? "";
+    return res.json({ summary: text.trim() });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ─── AI Assist: rewrite a single experience bullet ────────────────────────────
+app.post("/api/v2/ai-assist/bullet", async (req, res, next) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY) {
+      return res.status(503).json({ message: "AI assist is not configured on this server." });
+    }
+    const { bullet, role, company } = req.body as {
+      bullet?: string; role?: string; company?: string;
+    };
+    if (!bullet?.trim()) return res.status(400).json({ message: "bullet is required." });
+
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: "claude-haiku-4-5",
+      max_tokens: 150,
+      messages: [{
+        role: "user",
+        content:
+          `Rewrite this resume bullet point more professionally for a ${role || "professional"} at ${company || "a company"}.\n\n` +
+          `Original: "${bullet}"\n\n` +
+          `STRICT RULES:\n` +
+          `- Keep ALL facts exactly as stated — do NOT invent metrics, tools, or outcomes\n` +
+          `- Use a strong action verb at the start (Delivered, Implemented, Spearheaded, etc.)\n` +
+          `- Keep it concise — no more than 25 words longer than the original\n` +
+          `- Return ONLY the improved bullet text, no quotes or labels`,
+      }],
+    });
+
+    const text = (msg.content[0] as { type: string; text?: string })?.text ?? "";
+    return res.json({ improved: text.trim() || bullet });
   } catch (error) {
     return next(error);
   }
