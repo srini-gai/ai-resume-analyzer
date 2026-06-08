@@ -121,15 +121,16 @@ interface ExpEntry {
 }
 
 function parseExperience(section: ResumeSection): ExpEntry[] {
-  // If the section has clean bullets, treat the whole thing as one entry with
-  // bullets — we don't have entry boundaries detectable here.
+  // rewrittenBullets is only non-empty when Claude explicitly returned bullet strings.
+  // If it's empty, rewrittenContent holds the AI-rewritten prose (or original if unchanged).
   if (section.rewrittenBullets.length > 0) {
     return [{ title: "", meta: "", bullets: section.rewrittenBullets }];
   }
-  // Fallback — split rewrittenContent
-  const bullets = section.rewrittenContent
+  // Parse bullets from rewrittenContent; fall back to originalContent if empty.
+  const source = section.rewrittenContent.trim() || section.originalContent;
+  const bullets = source
     .split(/\n+/)
-    .map(l => l.replace(/^[•▪◦\-*]\s*/, "").trim())
+    .map(l => l.replace(/^[•▪◦\-*➤→·]\s*/, "").trim())
     .filter(Boolean);
   return [{ title: "", meta: "", bullets }];
 }

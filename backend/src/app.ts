@@ -150,6 +150,7 @@ app.post("/api/v2/optimized-docx", async (req, res, next) => {
   try {
     const body = req.body as { optimizedResume?: OptimizedResume };
     if (!body.optimizedResume) return res.status(400).json({ message: "optimizedResume is required." });
+
     const docxBuffer = await generateOptimizedDocx(body.optimizedResume);
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
     res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.docx"');

@@ -259,12 +259,19 @@ function rewriteSectionContent(
   if (section.type === "header") return section;
 
   if (section.type === "summary") {
-    const topSkills = analysis.matchedSkills.slice(0, 3).join(", ") || "enterprise technology";
-    const missing = analysis.missingSkills.slice(0, 2);
+    // Preserve the original summary — it contains the candidate's own words and is
+    // accurate. Only generate from template when the resume had no summary at all.
+    // Never insert raw JD word-tokens (they produce nonsense like "Proven track record
+    // of description, seeking, security").
+    const orig = section.originalContent.trim();
+    if (orig) {
+      return { ...section, rewrittenContent: orig, rewrittenBullets: [] };
+    }
+    // No original summary — generate a minimal one using only known matched skills
+    const topSkills = analysis.matchedSkills.slice(0, 4).join(", ") || "enterprise technology";
     const rewrittenContent =
-      `Accomplished professional with deep expertise in ${topSkills}. ` +
-      (missing.length ? `Actively expanding capabilities in ${missing.join(" and ")} to drive end-to-end value. ` : "") +
-      `Proven track record of ${jdKeywords.slice(0, 3).join(", ")} in high-growth, collaborative environments, consistently exceeding stakeholder expectations.`;
+      `Results-driven professional with proven expertise in ${topSkills}. ` +
+      `Demonstrated track record of delivering high-quality solutions and consistently exceeding stakeholder expectations.`;
     return { ...section, rewrittenContent, rewrittenBullets: [] };
   }
 
@@ -415,10 +422,14 @@ rewrittenBullets = individual bullet strings (no bullet character) for experienc
           p.title?.toLowerCase().includes(titleSlice))
         ?? parsed.find(p => p.type === orig.type);
       if (!ai) return orig;
+      // If Claude returned explicit bullets, use them.
+      // If not, return [] so docx-generator falls through to parse rewrittenContent —
+      // which IS the AI-rewritten text. Falling back to orig.bullets would silently
+      // write original content into the DOCX while the UI shows rewritten prose.
       return {
         ...orig,
         rewrittenContent: ai.rewrittenContent ?? orig.originalContent,
-        rewrittenBullets: ai.rewrittenBullets?.length ? ai.rewrittenBullets : orig.bullets,
+        rewrittenBullets: ai.rewrittenBullets?.length ? ai.rewrittenBullets : [],
       };
     });
 
