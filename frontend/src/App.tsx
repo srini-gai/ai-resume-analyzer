@@ -102,19 +102,33 @@ export default function App() {
     if (!result) return;
     setDownloadingDocx(true);
     try {
-      const response = await fetch(`${apiUrl}/api/v2/optimized-docx`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ optimizedResume: result.optimizedResume }),
-      });
+      const date = new Date().toISOString().slice(0, 10);
+      const safeName = (result.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_");
+      const filename = `ResumeIQ_Optimized_${safeName}_${date}.docx`;
+
+      let response: Response;
+
+      if (result.inputFormat === "docx" && file) {
+        // Original was a DOCX: send the file back so the backend can edit XML in-place,
+        // preserving the original table structure, fonts, and styles.
+        const body = new FormData();
+        body.append("resume", file);
+        body.append("optimizedResume", JSON.stringify(result.optimizedResume));
+        response = await fetch(`${apiUrl}/api/v2/optimized-docx-v2`, { method: "POST", body });
+      } else {
+        // PDF / DOC input or file no longer available: generate from template
+        response = await fetch(`${apiUrl}/api/v2/optimized-docx`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ optimizedResume: result.optimizedResume }),
+        });
+      }
+
       if (!response.ok) throw new Error("DOCX generation failed");
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      a.href = url;
-      const date = new Date().toISOString().slice(0, 10);
-      a.download = `ResumeIQ_Optimized_${(result.optimizedResume.candidateName ?? "Resume").replace(/\s+/g, "_")}_${date}.docx`;
-      a.click();
+      a.href = url; a.download = filename; a.click();
       URL.revokeObjectURL(url);
     } catch (e) {
       alert("Could not generate Word document. " + (e instanceof Error ? e.message : ""));

@@ -58,7 +58,8 @@ export interface GapSkillRow {
 export interface KeywordRow {
   keyword: string;
   present: boolean;
-  count: number;
+  count: number;      // occurrences in JD
+  resumeCount?: number; // occurrences in resume (two-column display)
 }
 
 export interface GapAnalysis {
@@ -74,4 +75,5 @@ export interface GapAnalysis {
 export interface V2AnalysisResult extends AnalysisResult {
   optimizedResume: OptimizedResume;
   gapAnalysis: GapAnalysis;
+  inputFormat?: "pdf" | "docx" | "doc";
 }

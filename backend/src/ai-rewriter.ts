@@ -238,7 +238,7 @@ const WEAK_VERBS: Record<string, string> = {
   "led": "Spearheaded", "managed": "Orchestrated",
 };
 
-function strengthenBullet(b: string, jdKeywords: string[]): string {
+function strengthenBullet(b: string, _jdKeywords: string[]): string {
   let text = fixPdfArtifact(b.trim());
   for (const [weak, strong] of Object.entries(WEAK_VERBS)) {
     if (new RegExp(`^${weak}\\b`, "i").test(text)) {
@@ -246,10 +246,7 @@ function strengthenBullet(b: string, jdKeywords: string[]): string {
       break;
     }
   }
-  if (!/\d/.test(text) && text.length > 30 && jdKeywords.length > 0) {
-    const kw = jdKeywords[Math.floor(Math.random() * Math.min(5, jdKeywords.length))];
-    if (kw) text = `${text}, driving measurable improvement in ${kw}`;
-  }
+  // Do NOT invent metrics or append filler phrases — preserve factual accuracy
   return text;
 }
 
@@ -277,12 +274,6 @@ function rewriteSectionContent(
       return { ...section, rewrittenContent: section.originalContent };
     }
     const rewrittenBullets = section.bullets.map(b => strengthenBullet(b, jdKeywords));
-    // Weave in up to 2 missing skills naturally
-    analysis.missingSkills.slice(0, 2).forEach((skill, i) => {
-      if (rewrittenBullets[i] && !rewrittenBullets[i].toLowerCase().includes(skill.toLowerCase())) {
-        rewrittenBullets[i] = `${rewrittenBullets[i].replace(/[,.]?\s*$/, "")}, leveraging ${skill}`;
-      }
-    });
     const rewrittenContent = rewrittenBullets.map(b => `• ${b}`).join("\n");
     return { ...section, rewrittenContent, rewrittenBullets };
   }
@@ -303,9 +294,18 @@ function rewriteSectionContent(
 
 function extractCandidateName(resumeText: string): string {
   const lines = resumeText.split("\n").map(l => l.trim()).filter(Boolean);
-  const first = lines[0] ?? "";
-  const words = first.split(/\s+/).filter(w => /^[A-Z][a-zA-Z'-]{1,}$/.test(w));
-  return words.slice(0, 3).join(" ") || first.split(/\s+/).slice(0, 2).join(" ") || "Candidate";
+  // Search first 5 lines for a name-like line (no contact info, short, word-only)
+  for (const line of lines.slice(0, 5)) {
+    if (/@|http|linkedin|\d{3}[-.]?\d{3}|\d{10}|phone:|email:/.test(line.toLowerCase())) continue;
+    if (line.length > 60 || line.length < 2) continue;
+    const words = line.split(/\s+/).filter(w => /^[A-Za-z][a-zA-Z'-]{0,}$/.test(w));
+    if (words.length >= 1 && words.length <= 4) {
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+    }
+  }
+  const first = lines[0] ?? "Candidate";
+  const words = first.split(/\s+/).slice(0, 2);
+  return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ") || "Candidate";
 }
 
 // ─── JD keyword extractor ─────────────────────────────────────────────────────
@@ -370,26 +370,28 @@ export async function rewriteResume(
     bullets: s.bullets.slice(0, 10),
   }));
 
-  const prompt = `You are an elite executive resume writer. Rewrite each section below to better match the job description.
+  const prompt = `You are an expert resume editor. Rewrite each section below to better align with the job description.
 
-STRICT RULES:
-1. Preserve EXACT section titles and order
-2. Keep ALL facts (names, dates, metrics, technologies) — only improve language
-3. Replace weak verbs with power verbs (Spearheaded, Orchestrated, Delivered, Drove, Engineered)
-4. Inject matched skills naturally: ${analysis.matchedSkills.join(", ")}
-5. Weave in missing skills where truthful: ${analysis.missingSkills.slice(0, 4).join(", ")}
-6. Add quantified outcomes (%, $, headcount) where plausible
-7. Return ONLY valid JSON array — no markdown, no code blocks
+STRICT RULES — FOLLOW EXACTLY:
+1. Preserve EXACT section titles and order.
+2. Keep ALL facts: names, company names, dates, metrics, technologies. Do NOT alter or invent any.
+3. Replace weak verbs with power verbs: Spearheaded, Orchestrated, Delivered, Drove, Configured, Implemented.
+4. Where natural and truthful, incorporate these matched skills from the JD: ${analysis.matchedSkills.slice(0, 6).join(", ")}.
+5. Do NOT invent metrics, percentages, or outcomes that are not in the original text.
+6. Do NOT append filler phrases like "driving measurable improvement in X" or "achieving significant results".
+7. If a bullet has no quantifiable metric in the original, leave it without adding one.
+8. Only rewrite language — never add new facts, responsibilities, or tools not present in the original.
+9. Return ONLY valid JSON array — no markdown, no code blocks, no explanation.
 
-Job Description:
+Job Description (excerpt):
 ${jobDescription.slice(0, 800)}
 
-Sections:
+Sections to rewrite:
 ${JSON.stringify(sectionJson, null, 2)}
 
-Return JSON array with ${rewritable.length} objects:
+Return exactly ${rewritable.length} objects in a JSON array:
 [{"type":"...","title":"...","rewrittenContent":"...","rewrittenBullets":["..."]}]
-rewrittenBullets = individual bullet strings (no bullet char) for experience/skills/projects/other, else []`;
+rewrittenBullets = individual bullet strings (no bullet character) for experience/skills/projects/other sections, else []`;
 
   try {
     const message = await client.messages.create({
@@ -407,7 +409,10 @@ rewrittenBullets = individual bullet strings (no bullet char) for experience/ski
 
     const sections: ResumeSection[] = rawSections.map(orig => {
       if (orig.type === "header") return orig;
+      const titleSlice = orig.originalTitle.toLowerCase().slice(0, 10);
       const ai = parsed.find(p => p.type === orig.type && p.title === orig.originalTitle)
+        ?? parsed.find(p => p.type === orig.type && titleSlice.length >= 4 &&
+          p.title?.toLowerCase().includes(titleSlice))
         ?? parsed.find(p => p.type === orig.type);
       if (!ai) return orig;
       return {

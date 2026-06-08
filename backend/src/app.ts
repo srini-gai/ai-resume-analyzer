@@ -8,6 +8,7 @@ import { rewriteResume } from "./ai-rewriter.js";
 import { buildGapAnalysis } from "./gap-analyzer.js";
 import { editPdfInPlace } from "./pdf-editor.js";
 import { generateOptimizedDocx } from "./docx-generator.js";
+import { editDocxInPlace } from "./docx-xml-editor.js";
 import { parseResume, detectFormat, ACCEPTED_MIMETYPES } from "./resume-parser.js";
 import type { OptimizedResume } from "./ai-rewriter.js";
 
@@ -107,6 +108,38 @@ app.post("/api/v2/optimized-pdf", upload.single("resume"), async (req, res, next
     res.setHeader("Content-Type", "application/pdf");
     res.setHeader("Content-Disposition", 'attachment; filename="ResumeIQ_Optimized.pdf"');
     return res.end(outputBuffer);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ─── v2: in-place DOCX edit — preserves original template (multipart) ────────
+// Send: resume file (original DOCX) + optimizedResume (JSON string field)
+app.post("/api/v2/optimized-docx-v2", upload.single("resume"), async (req, res, next) => {
+  try {
+    if (!req.file) return res.status(400).json({ message: "Resume file required." });
+    const optimizedResumeStr = req.body.optimizedResume as string | undefined;
+    if (!optimizedResumeStr) return res.status(400).json({ message: "optimizedResume field required." });
+
+    const optimizedResume = JSON.parse(optimizedResumeStr) as OptimizedResume;
+    const format = detectFormat(req.file.mimetype, req.file.originalname);
+
+    let docxBuffer: Buffer;
+    if (format === "docx") {
+      try {
+        docxBuffer = await editDocxInPlace(req.file.buffer, optimizedResume.sections);
+      } catch {
+        docxBuffer = await generateOptimizedDocx(optimizedResume);
+      }
+    } else {
+      docxBuffer = await generateOptimizedDocx(optimizedResume);
+    }
+
+    const safeName = (optimizedResume.candidateName ?? "Resume").replace(/[^a-zA-Z0-9_-]/g, "_");
+    const date = new Date().toISOString().slice(0, 10);
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="ResumeIQ_Optimized_${safeName}_${date}.docx"`);
+    return res.end(docxBuffer);
   } catch (error) {
     return next(error);
   }
