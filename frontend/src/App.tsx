@@ -368,14 +368,6 @@ export default function App() {
                             Your resume structure preserved — only the language was improved.
                           </p>
                         </div>
-                        <button
-                          onClick={downloadOptimizedDocx}
-                          disabled={downloadingDocx}
-                          className="flex items-center gap-2 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-5 py-2.5 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 transition hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                          {downloadingDocx ? <LoaderCircle className="animate-spin" size={16} /> : <Download size={16} />}
-                          {downloadingDocx ? "Generating…" : "Download Optimized Resume (.docx)"}
-                        </button>
                       </div>
 
                       {/* Column headers */}
