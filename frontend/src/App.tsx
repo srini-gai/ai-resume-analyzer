@@ -1,13 +1,16 @@
-import { useEffect, useState, useRef, type FormEvent } from "react";
+import { useEffect, useState, useRef, type FormEvent, type ReactNode } from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   FileSearch, LoaderCircle, ShieldCheck, Sparkles, UploadCloud, X,
   CheckCircle2, AlertCircle, FileText, Wand2, Download,
+  Mail, MessageSquare, Menu,
 } from "lucide-react";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Results } from "./components/Results";
 import { ReportPDFDownloadLink } from "./components/pdf/ReportPDF";
 import ResumeBuilder from "./pages/ResumeBuilder";
+import CoverLetter from "./pages/CoverLetter";
+import InterviewPrep from "./pages/InterviewPrep";
 import type { V2AnalysisResult } from "./types";
 
 // Inline word-level diff — highlights words that are new/changed in the revised text
@@ -41,7 +44,7 @@ const LOADING_STEPS = [
 // Light: solid white card with subtle shadow. Dark: deep navy card with border.
 const cardCls = "rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-700/60 dark:bg-slate-900";
 
-type View = "analyze" | "builder";
+type View = "analyze" | "builder" | "cover-letter" | "interview-prep";
 type Tab = "analysis" | "optimized" | "report";
 
 export default function App() {
@@ -57,6 +60,7 @@ export default function App() {
   const [skillFilter, setSkillFilter] = useState<"all" | "matched" | "missing">("all");
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const downloadOptimizedPdf = async () => {
     if (!file) { alert("Original resume file no longer available. Please re-upload."); return; }
@@ -187,23 +191,30 @@ export default function App() {
   // Dark: deep navy. Light: pure white — no gray gradients.
   const bgCls = dark ? "bg-[#07091a]" : "bg-white";
 
-  if (view === "builder") {
-    return (
-      <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
-        {dark && <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(99,102,241,.25),transparent_50%),radial-gradient(ellipse_at_80%_20%,rgba(139,92,246,.15),transparent_50%)]" />}
-        <header className="relative mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
-          <div className="flex items-center gap-2 font-bold text-lg text-slate-900 dark:text-white">
-            <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30"><FileSearch size={20} /></span>
-            ResumeIQ
-          </div>
-          <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
-        </header>
-        <div className="relative">
-          <ResumeBuilder onBack={() => setView("analyze")} />
-        </div>
-      </main>
-    );
-  }
+  // Shared slim header used by full-page tool views (builder, cover letter, interview prep)
+  const toolHeader = (
+    <header className="relative mx-auto flex max-w-6xl items-center justify-between px-5 py-6">
+      <div className="flex items-center gap-2 font-bold text-lg text-slate-900 dark:text-white">
+        <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30">
+          <FileSearch size={20} />
+        </span>
+        ResumeIQ
+      </div>
+      <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
+    </header>
+  );
+
+  const toolShell = (child: ReactNode) => (
+    <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
+      {dark && <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(99,102,241,.25),transparent_50%),radial-gradient(ellipse_at_80%_20%,rgba(139,92,246,.15),transparent_50%)]" />}
+      {toolHeader}
+      <div className="relative">{child}</div>
+    </main>
+  );
+
+  if (view === "builder")       return toolShell(<ResumeBuilder   onBack={() => setView("analyze")} />);
+  if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={() => setView("analyze")} />);
+  if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={() => setView("analyze")} />);
 
   return (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
@@ -215,13 +226,59 @@ export default function App() {
           <span className="grid size-9 place-items-center rounded-xl bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-lg shadow-indigo-500/30"><FileSearch size={20} /></span>
           ResumeIQ
         </div>
-        <div className="flex items-center gap-3">
+
+        {/* Desktop nav */}
+        <div className="hidden items-center gap-2 sm:flex">
           <button onClick={() => setView("builder")}
-            className="rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-indigo-500/20 hover:brightness-110 transition flex items-center gap-2">
-            <FileText size={15} /> Build Resume
+            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-indigo-500/20 hover:brightness-110 transition">
+            <FileText size={13} /> Build Resume
+          </button>
+          <button onClick={() => setView("cover-letter")}
+            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-teal-500/20 hover:brightness-110 transition">
+            <Mail size={13} /> Cover Letter
+          </button>
+          <button onClick={() => setView("interview-prep")}
+            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-amber-500/20 hover:brightness-110 transition">
+            <MessageSquare size={13} /> Interview Prep
           </button>
           <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
         </div>
+
+        {/* Mobile: theme + hamburger */}
+        <div className="flex items-center gap-2 sm:hidden">
+          <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
+          <button
+            onClick={() => setMenuOpen(o => !o)}
+            className="grid size-9 place-items-center rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 transition"
+          >
+            {menuOpen ? <X size={18} /> : <Menu size={18} />}
+          </button>
+        </div>
+
+        {/* Mobile dropdown */}
+        <AnimatePresence>
+          {menuOpen && (
+            <motion.div
+              initial={{ opacity: 0, y: -8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.15 }}
+              className="absolute left-0 right-0 top-full z-50 flex flex-col gap-2 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900 sm:hidden"
+            >
+              {[
+                { label: "Build Resume",   view: "builder"        as View, cls: "from-indigo-600 to-violet-500", icon: <FileText size={14} /> },
+                { label: "Cover Letter",   view: "cover-letter"   as View, cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
+                { label: "Interview Prep", view: "interview-prep" as View, cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
+              ].map(item => (
+                <button key={item.label}
+                  onClick={() => { setView(item.view); setMenuOpen(false); }}
+                  className={`flex items-center gap-2 rounded-2xl bg-gradient-to-r ${item.cls} px-4 py-2.5 text-sm font-bold text-white`}>
+                  {item.icon} {item.label}
+                </button>
+              ))}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </header>
 
       <div className="relative mx-auto max-w-6xl px-5 pb-16 pt-8">

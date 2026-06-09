@@ -11,6 +11,7 @@ import { editPdfInPlace } from "./pdf-editor.js";
 import { generateOptimizedDocx } from "./docx-generator.js";
 import { editDocxInPlace } from "./docx-xml-editor.js";
 import { parseResume, detectFormat, ACCEPTED_MIMETYPES } from "./resume-parser.js";
+import { generateCoverLetterDocx } from "./cover-letter-generator.js";
 import type { OptimizedResume } from "./ai-rewriter.js";
 
 const maxBytes = Number(process.env.MAX_FILE_SIZE_MB || 5) * 1024 * 1024;
@@ -159,6 +160,153 @@ app.post("/api/v2/optimized-docx", async (req, res, next) => {
   } catch (error) {
     return next(error);
   }
+});
+
+// ─── Helper: extract candidate name from raw resume text ─────────────────────
+function nameFromResumeText(text: string): string {
+  const lines = text.split("\n").map(l => l.trim()).filter(Boolean);
+  for (const line of lines.slice(0, 5)) {
+    if (/@|http|\d{3}[-.]?\d{3}|\d{10}/.test(line.toLowerCase())) continue;
+    if (line.length > 60 || line.length < 2) continue;
+    const words = line.split(/\s+/).filter(w => /^[A-Za-z][a-zA-Z'-]*$/.test(w));
+    if (words.length >= 1 && words.length <= 4)
+      return words.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+  }
+  return (lines[0] ?? "Candidate").slice(0, 50);
+}
+
+// ─── Cover Letter: generate using Claude ─────────────────────────────────────
+app.post("/api/v2/cover-letter", upload.single("resume"), async (req, res, next) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY)
+      return res.status(503).json({ message: "AI features are not configured on this server." });
+
+    let resumeText = "";
+    let candidateName = "the candidate";
+
+    if (req.file) {
+      const fmt = detectFormat(req.file.mimetype, req.file.originalname);
+      if (fmt) {
+        try {
+          const parsed = await parseResume(req.file.buffer, fmt);
+          resumeText = parsed.text;
+          candidateName = nameFromResumeText(resumeText);
+        } catch { /* continue without resume */ }
+      }
+    }
+
+    const companyName    = String(req.body.companyName    ?? "").trim() || "the company";
+    const jobRole        = String(req.body.jobRole        ?? "").trim() || "the position";
+    const jobDescription = String(req.body.jobDescription ?? "").trim();
+
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 1024,
+      system: "You are an expert career coach writing professional cover letters.",
+      messages: [{
+        role: "user",
+        content:
+          `Write a professional cover letter for a ${jobRole} position at ${companyName}.\n` +
+          (resumeText ? `\nResume:\n${resumeText.slice(0, 3000)}\n` : "") +
+          (jobDescription ? `\nJob Description:\n${jobDescription.slice(0, 1000)}\n` : "") +
+          `\nRequirements:\n` +
+          `- Formal professional tone\n` +
+          `- Highlight 3 most relevant skills or achievements from the resume that match the role\n` +
+          `- Opening paragraph: strong hook connecting the candidate to ${companyName}\n` +
+          `- Middle paragraph: specific achievements with context from the resume\n` +
+          `- Closing paragraph: clear call to action\n` +
+          `- 250-300 words maximum\n` +
+          `- Do NOT invent facts, metrics, or experience not present in the resume\n` +
+          `- Return plain text only — no markdown, no bullet symbols, no formatting`,
+      }],
+    });
+
+    const coverLetter = (msg.content[0] as { type: string; text?: string })?.text?.trim() ?? "";
+    const wordCount = coverLetter.split(/\s+/).filter(Boolean).length;
+
+    return res.json({ coverLetter, wordCount, candidateName });
+  } catch (error) { return next(error); }
+});
+
+// ─── Cover Letter: download as DOCX ──────────────────────────────────────────
+app.post("/api/v2/cover-letter-docx", async (req, res, next) => {
+  try {
+    const { coverLetter, candidateName, companyName, jobRole } = req.body as {
+      coverLetter?: string; candidateName?: string; companyName?: string; jobRole?: string;
+    };
+    if (!coverLetter?.trim()) return res.status(400).json({ message: "coverLetter is required." });
+
+    const docxBuffer = await generateCoverLetterDocx({
+      coverLetter,
+      candidateName: candidateName ?? "Candidate",
+      companyName:   companyName   ?? "Company",
+      jobRole:       jobRole       ?? "Position",
+    });
+
+    const safeName = (candidateName ?? "CoverLetter").replace(/[^a-zA-Z0-9_-]/g, "_");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.wordprocessingml.document");
+    res.setHeader("Content-Disposition", `attachment; filename="CoverLetter_${safeName}.docx"`);
+    return res.end(docxBuffer);
+  } catch (error) { return next(error); }
+});
+
+// ─── Interview Prep: generate Q&A using Claude ────────────────────────────────
+app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, next) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY)
+      return res.status(503).json({ message: "AI features are not configured on this server." });
+
+    let resumeContext = "";
+    if (req.file) {
+      const fmt = detectFormat(req.file.mimetype, req.file.originalname);
+      if (fmt) {
+        try {
+          const parsed = await parseResume(req.file.buffer, fmt);
+          resumeContext = `\nCandidate Resume (use to tailor questions):\n${parsed.text.slice(0, 2000)}`;
+        } catch { /* continue without resume */ }
+      }
+    }
+
+    const jobRole       = String(req.body.jobRole       ?? "").trim() || "Software Engineer";
+    const jobDescription = String(req.body.jobDescription ?? "").trim();
+    const interviewType  = String(req.body.interviewType  ?? "Mixed").trim();
+    const questionCount  = Math.min(10, Math.max(3, parseInt(String(req.body.questionCount ?? "5")) || 5));
+
+    const client = new Anthropic();
+    const msg = await client.messages.create({
+      model: "claude-sonnet-4-5",
+      max_tokens: 4096,
+      messages: [{
+        role: "user",
+        content:
+          `You are an expert interview coach.\n\n` +
+          `Role: ${jobRole}\n` +
+          `Interview type: ${interviewType}\n` +
+          (jobDescription ? `Job Description: ${jobDescription.slice(0, 1000)}\n` : "") +
+          resumeContext + "\n\n" +
+          `Generate exactly ${questionCount} mock interview questions with detailed answers.\n\n` +
+          `Rules:\n` +
+          `- Technical questions: focus on role-specific skills from the JD\n` +
+          `- Behavioural questions: use STAR format (Situation, Task, Action, Result)\n` +
+          `- Mixed: alternate between technical and behavioural\n` +
+          `- If resume provided, tailor questions to the candidate's actual background\n\n` +
+          `Return ONLY a valid JSON array — no markdown, no code fences:\n` +
+          `[{"question":"...","type":"technical|behavioural","keyPoints":["..."],"modelAnswer":"...","tip":"..."}]`,
+      }],
+    });
+
+    const raw = (msg.content[0] as { type: string; text?: string })?.text ?? "[]";
+    let questions: unknown[];
+    try {
+      const m = raw.match(/\[[\s\S]*\]/);
+      questions = JSON.parse(m ? m[0] : raw) as unknown[];
+    } catch {
+      return res.status(500).json({ message: "AI returned an unexpected format. Please try again." });
+    }
+
+    return res.json({ questions, jobRole, interviewType });
+  } catch (error) { return next(error); }
 });
 
 // ─── AI Assist: 3-sentence professional summary ───────────────────────────────
