@@ -3,6 +3,8 @@ import express, { type ErrorRequestHandler } from "express";
 import rateLimit from "express-rate-limit";
 import helmet from "helmet";
 import multer from "multer";
+import cookieParser from "cookie-parser";
+import passport from "passport";
 import Anthropic from "@anthropic-ai/sdk";
 import { analyzeResume } from "./analyzer.js";
 import { rewriteResume } from "./ai-rewriter.js";
@@ -13,6 +15,8 @@ import { editDocxInPlace } from "./docx-xml-editor.js";
 import { parseResume, detectFormat, ACCEPTED_MIMETYPES } from "./resume-parser.js";
 import { generateCoverLetterDocx } from "./cover-letter-generator.js";
 import type { OptimizedResume } from "./ai-rewriter.js";
+import { requireAuth, authRouter, adminRouter } from "./auth.js";
+import { query } from "./db.js";
 
 const maxBytes = Number(process.env.MAX_FILE_SIZE_MB || 5) * 1024 * 1024;
 const upload = multer({
@@ -29,11 +33,20 @@ export const app = express();
 app.set("trust proxy", 1);
 app.use(helmet());
 const allowedOrigins = process.env.CLIENT_ORIGIN?.split(",").map(o => o.trim()).filter(Boolean);
-app.use(cors({ origin: allowedOrigins?.length ? allowedOrigins : false }));
+app.use(cors({ origin: allowedOrigins?.length ? allowedOrigins : false, credentials: true }));
+app.use(cookieParser());
 app.use(express.json({ limit: "4mb" }));
+app.use(passport.initialize());
 app.use("/api", rateLimit({ windowMs: 60_000, limit: 30, standardHeaders: "draft-7", legacyHeaders: false }));
 
+// ─── Auth + Admin routes (no auth required) ───────────────────────────────────
+app.use("/auth", authRouter);
+app.use("/admin", adminRouter);
+
 app.get("/api/health", (_req, res) => res.json({ status: "ok" }));
+
+// ─── Auth guard on all v2 API routes ─────────────────────────────────────────
+app.use("/api/v2", requireAuth);
 
 // ─── Helper: parse uploaded resume (PDF or DOCX) ─────────────────────────────
 async function readResumeFromRequest(req: express.Request): Promise<{ text: string; format: "pdf" | "docx" | "doc" } | { error: string; status: number }> {
@@ -74,7 +87,20 @@ app.post("/api/v2/analyze", upload.single("resume"), async (req, res, next) => {
       rewriteResume(parsed.text, jobDescription, baseResult),
       Promise.resolve(buildGapAnalysis(parsed.text, jobDescription, baseResult)),
     ]);
-    return res.json({ ...baseResult, optimizedResume, gapAnalysis, inputFormat: parsed.format });
+    const data = { ...baseResult, optimizedResume, gapAnalysis, inputFormat: parsed.format };
+
+    if (req.authUser?.id) {
+      try {
+        await query(
+          "INSERT INTO analyses (user_id, filename, job_description, result) VALUES ($1, $2, $3, $4)",
+          [req.authUser.id, req.file?.originalname ?? null, jobDescription.slice(0, 500), JSON.stringify(data)]
+        );
+      } catch (dbErr) {
+        console.error("Failed to save analysis history:", dbErr);
+      }
+    }
+
+    return res.json(data);
   } catch (error) {
     return next(error);
   }
@@ -519,6 +545,31 @@ app.post("/api/v2/ai-assist/bullet", async (req, res, next) => {
 
     const text = (msg.content[0] as { type: string; text?: string })?.text ?? "";
     return res.json({ improved: text.trim() || bullet });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// ─── Analysis history ─────────────────────────────────────────────────────────
+app.get("/api/v2/history", async (req, res, next) => {
+  try {
+    if (!req.authUser?.id) return res.json({ analyses: [] });
+
+    const result = await query<{
+      id: string;
+      filename: string | null;
+      created_at: string;
+      result: unknown;
+    }>(
+      `SELECT id, filename, created_at, result
+       FROM analyses
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 10`,
+      [req.authUser.id]
+    );
+
+    return res.json({ analyses: result.rows });
   } catch (error) {
     return next(error);
   }

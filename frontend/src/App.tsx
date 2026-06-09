@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   FileSearch, LoaderCircle, ShieldCheck, Sparkles, UploadCloud, X,
   CheckCircle2, AlertCircle, FileText, Wand2, Download,
-  Mail, MessageSquare, Menu, Layers,
+  Mail, MessageSquare, Menu, Layers, LogOut, ShieldAlert, History,
 } from "lucide-react";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Results } from "./components/Results";
@@ -12,7 +12,35 @@ import ResumeBuilder from "./pages/ResumeBuilder";
 import CoverLetter from "./pages/CoverLetter";
 import InterviewPrep from "./pages/InterviewPrep";
 import BatchApply from "./pages/BatchApply";
+import Admin from "./pages/Admin";
+import Login from "./pages/Login";
+import Landing from "./pages/Landing";
 import type { V2AnalysisResult } from "./types";
+
+// ─── Auth types ───────────────────────────────────────────────────────────────
+
+interface AuthUser {
+  id: string;
+  email: string;
+  name: string | null;
+  avatar_url: string | null;
+  status: string;
+  isAdmin: boolean;
+}
+
+type AuthState =
+  | { type: "loading" }
+  | { type: "no_auth" }
+  | { type: "unauthenticated"; error?: string }
+  | { type: "pending"; user: AuthUser }
+  | { type: "authenticated"; user: AuthUser };
+
+interface HistoryItem {
+  id: string;
+  filename: string | null;
+  created_at: string;
+  result: V2AnalysisResult;
+}
 
 // Inline word-level diff — highlights words that are new/changed in the revised text
 function WordDiff({ original, revised }: { original: string; revised: string }) {
@@ -33,7 +61,7 @@ function WordDiff({ original, revised }: { original: string; revised: string }) 
   );
 }
 
-const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const apiUrl = import.meta.env.VITE_API_URL ?? "";
 
 const LOADING_STEPS = [
   "Parsing resume...",
@@ -45,7 +73,7 @@ const LOADING_STEPS = [
 // Light: solid white card with subtle shadow. Dark: deep navy card with border.
 const cardCls = "rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-700/60 dark:bg-slate-900";
 
-type View = "analyze" | "builder" | "cover-letter" | "interview-prep" | "batch-apply";
+type View = "analyze" | "builder" | "cover-letter" | "interview-prep" | "batch-apply" | "admin";
 type Tab = "analysis" | "optimized" | "report";
 
 export default function App() {
@@ -62,6 +90,10 @@ export default function App() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // Auth
+  const [authState, setAuthState] = useState<AuthState>({ type: "loading" });
+  const [history, setHistory] = useState<HistoryItem[]>([]);
 
   const downloadOptimizedPdf = async () => {
     if (!file) { alert("Original resume file no longer available. Please re-upload."); return; }
@@ -148,6 +180,51 @@ export default function App() {
     document.documentElement.classList.toggle("dark", dark);
   }, [dark]);
 
+  // ── Auth check on mount ────────────────────────────────────────────────────
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const oauthError = urlParams.get("error");
+    if (oauthError) {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
+
+    fetch(`${apiUrl}/auth/me`)
+      .then(async r => {
+        if (r.ok) {
+          const data = await r.json() as { authEnabled?: boolean } | AuthUser;
+          if ("authEnabled" in data && data.authEnabled === false) {
+            setAuthState({ type: "no_auth" });
+          } else {
+            const user = data as AuthUser;
+            if (user.status === "approved") {
+              setAuthState({ type: "authenticated", user });
+            } else if (user.status === "pending") {
+              setAuthState({ type: "pending", user });
+            } else {
+              setAuthState({ type: "unauthenticated", error: oauthError ?? undefined });
+            }
+          }
+        } else {
+          setAuthState({ type: "unauthenticated", error: oauthError ?? undefined });
+        }
+      })
+      .catch(() => setAuthState({ type: "no_auth" }));
+  }, []);
+
+  // ── Load analysis history after auth ──────────────────────────────────────
+  useEffect(() => {
+    if (authState.type !== "authenticated") return;
+    fetch(`${apiUrl}/api/v2/history`)
+      .then(r => r.ok ? r.json() as Promise<{ analyses: HistoryItem[] }> : Promise.resolve({ analyses: [] }))
+      .then(d => setHistory(d.analyses.slice(0, 3)))
+      .catch(() => {/* silently skip */});
+  }, [authState.type]);
+
+  const logout = () => {
+    fetch(`${apiUrl}/auth/logout`, { method: "POST" })
+      .finally(() => setAuthState({ type: "unauthenticated" }));
+  };
+
   useEffect(() => {
     if (loading) {
       setLoadingStep(0);
@@ -216,10 +293,29 @@ export default function App() {
   // Navigate back to analyzer, scroll to top so any existing result is immediately visible
   const goBackToAnalyze = () => { setView("analyze"); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
+  // ── Auth gates ──────────────────────────────────────────────────────────────
+  if (authState.type === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-[#07091a]">
+        <LoaderCircle className="animate-spin text-indigo-500" size={32} />
+      </div>
+    );
+  }
+
+  if (authState.type === "unauthenticated") {
+    // OAuth error returned → show sign-in card; otherwise show full landing page
+    return authState.error ? <Login error={authState.error} /> : <Landing />;
+  }
+
+  if (authState.type === "pending") {
+    return <Login user={authState.user} onLogout={logout} />;
+  }
+
   if (view === "builder")       return toolShell(<ResumeBuilder   onBack={goBackToAnalyze} />);
   if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={goBackToAnalyze} />);
   if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={goBackToAnalyze} />);
   if (view === "batch-apply")   return toolShell(<BatchApply      onBack={goBackToAnalyze} />);
+  if (view === "admin")         return toolShell(<Admin           onBack={goBackToAnalyze} />);
 
   return (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
@@ -250,7 +346,28 @@ export default function App() {
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-violet-500/20 hover:brightness-110 transition">
             <Layers size={13} /> Batch Apply
           </button>
+          {authState.type === "authenticated" && authState.user.isAdmin && (
+            <button onClick={() => setView("admin")}
+              className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition">
+              <ShieldAlert size={13} /> Admin
+            </button>
+          )}
           <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
+          {authState.type === "authenticated" && (
+            <div className="flex items-center gap-2 pl-1">
+              {authState.user.avatar_url ? (
+                <img src={authState.user.avatar_url} alt="" className="size-7 rounded-full ring-2 ring-indigo-500/40" />
+              ) : (
+                <div className="grid size-7 place-items-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-400">
+                  {(authState.user.name ?? authState.user.email)[0]?.toUpperCase()}
+                </div>
+              )}
+              <button onClick={logout} title="Sign out"
+                className="grid size-7 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-rose-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 transition">
+                <LogOut size={13} />
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Mobile: theme + hamburger */}
@@ -278,7 +395,10 @@ export default function App() {
                 { label: "Build Resume",   view: "builder"        as View, cls: "from-indigo-600 to-violet-500", icon: <FileText size={14} /> },
                 { label: "Cover Letter",   view: "cover-letter"   as View, cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
                 { label: "Interview Prep", view: "interview-prep" as View, cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
-                { label: "Batch Apply",   view: "batch-apply"   as View, cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
+                { label: "Batch Apply",    view: "batch-apply"    as View, cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
+                ...(authState.type === "authenticated" && authState.user.isAdmin
+                  ? [{ label: "Admin", view: "admin" as View, cls: "from-slate-600 to-slate-700", icon: <ShieldAlert size={14} /> }]
+                  : []),
               ].map(item => (
                 <button key={item.label}
                   onClick={() => { setView(item.view); setMenuOpen(false); }}
@@ -286,6 +406,12 @@ export default function App() {
                   {item.icon} {item.label}
                 </button>
               ))}
+              {authState.type === "authenticated" && (
+                <button onClick={() => { logout(); setMenuOpen(false); }}
+                  className="flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-2.5 text-sm font-semibold text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                  <LogOut size={14} /> Sign out ({authState.user.name?.split(" ")[0] ?? authState.user.email})
+                </button>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
@@ -366,8 +492,46 @@ export default function App() {
                     <Sparkles size={19} /> Analyze my resume
                   </button>
                 )}
-                <p className="flex items-center justify-center gap-1.5 text-xs text-slate-500"><ShieldCheck size={13} /> Your resume is processed in memory and never stored.</p>
+                <p className="flex items-center justify-center gap-1.5 text-xs text-slate-500">
+                  <ShieldCheck size={13} />
+                  {authState.type === "authenticated" ? "Analysis saved to your history." : "Your resume is processed securely."}
+                </p>
               </form>
+            </div>
+          )}
+
+          {/* Recent analyses history */}
+          {!result && history.length > 0 && (
+            <div className={`${cardCls} p-5 mx-auto max-w-3xl`} style={{ gridColumn: "1 / -1" }}>
+              <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                <History size={13} /> Recent analyses
+              </p>
+              <div className="space-y-2">
+                {history.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => { setResult(item.result); setActiveTab("analysis"); setFile(null); }}
+                    className="flex w-full items-center justify-between rounded-xl border border-slate-100 bg-slate-50 px-4 py-2.5 text-left transition hover:border-indigo-200 hover:bg-indigo-50/50 dark:border-slate-800 dark:bg-slate-800/50 dark:hover:border-indigo-500/30 dark:hover:bg-indigo-500/5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm font-semibold text-slate-800 dark:text-slate-200">
+                        {item.filename ?? "Unnamed analysis"}
+                      </p>
+                      <p className="text-xs text-slate-400">
+                        {new Date(item.created_at).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}
+                      </p>
+                    </div>
+                    <div className="ml-4 flex shrink-0 gap-2">
+                      <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-bold text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
+                        Match {item.result.matchScore}%
+                      </span>
+                      <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-bold text-violet-700 dark:bg-violet-900/30 dark:text-violet-400">
+                        Str {item.result.strengthScore}%
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

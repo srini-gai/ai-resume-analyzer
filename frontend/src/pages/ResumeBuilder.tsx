@@ -43,7 +43,7 @@ const SKILL_CATEGORY_LABELS = [
   "Technical Skills", "Domain Skills", "Tools & Platforms", "Soft Skills",
 ] as const;
 
-const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const apiUrl = import.meta.env.VITE_API_URL ?? "";
 
 const defaultEntry = (): ExperienceEntry => ({
   company: "", role: "", startDate: "", endDate: "", bullets: ["", "", ""],

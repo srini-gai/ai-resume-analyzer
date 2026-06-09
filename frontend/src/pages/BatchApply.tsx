@@ -5,7 +5,7 @@ import {
   ChevronDown, ChevronUp, Copy, Check, Download, Layers,
 } from "lucide-react";
 
-const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:4000";
+const apiUrl = import.meta.env.VITE_API_URL ?? "";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
