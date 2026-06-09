@@ -3,7 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   FileSearch, LoaderCircle, ShieldCheck, Sparkles, UploadCloud, X,
   CheckCircle2, AlertCircle, FileText, Wand2, Download,
-  Mail, MessageSquare, Menu,
+  Mail, MessageSquare, Menu, Layers,
 } from "lucide-react";
 import { ThemeToggle } from "./components/ThemeToggle";
 import { Results } from "./components/Results";
@@ -11,6 +11,7 @@ import { ReportPDFDownloadLink } from "./components/pdf/ReportPDF";
 import ResumeBuilder from "./pages/ResumeBuilder";
 import CoverLetter from "./pages/CoverLetter";
 import InterviewPrep from "./pages/InterviewPrep";
+import BatchApply from "./pages/BatchApply";
 import type { V2AnalysisResult } from "./types";
 
 // Inline word-level diff — highlights words that are new/changed in the revised text
@@ -44,7 +45,7 @@ const LOADING_STEPS = [
 // Light: solid white card with subtle shadow. Dark: deep navy card with border.
 const cardCls = "rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-700/60 dark:bg-slate-900";
 
-type View = "analyze" | "builder" | "cover-letter" | "interview-prep";
+type View = "analyze" | "builder" | "cover-letter" | "interview-prep" | "batch-apply";
 type Tab = "analysis" | "optimized" | "report";
 
 export default function App() {
@@ -218,6 +219,7 @@ export default function App() {
   if (view === "builder")       return toolShell(<ResumeBuilder   onBack={goBackToAnalyze} />);
   if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={goBackToAnalyze} />);
   if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={goBackToAnalyze} />);
+  if (view === "batch-apply")   return toolShell(<BatchApply      onBack={goBackToAnalyze} />);
 
   return (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
@@ -243,6 +245,10 @@ export default function App() {
           <button onClick={() => setView("interview-prep")}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-amber-500/20 hover:brightness-110 transition">
             <MessageSquare size={13} /> Interview Prep
+          </button>
+          <button onClick={() => setView("batch-apply")}
+            className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-violet-500/20 hover:brightness-110 transition">
+            <Layers size={13} /> Batch Apply
           </button>
           <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
         </div>
@@ -272,6 +278,7 @@ export default function App() {
                 { label: "Build Resume",   view: "builder"        as View, cls: "from-indigo-600 to-violet-500", icon: <FileText size={14} /> },
                 { label: "Cover Letter",   view: "cover-letter"   as View, cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
                 { label: "Interview Prep", view: "interview-prep" as View, cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
+                { label: "Batch Apply",   view: "batch-apply"   as View, cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
               ].map(item => (
                 <button key={item.label}
                   onClick={() => { setView(item.view); setMenuOpen(false); }}

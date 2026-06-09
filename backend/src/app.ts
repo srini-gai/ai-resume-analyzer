@@ -175,6 +175,93 @@ function nameFromResumeText(text: string): string {
   return (lines[0] ?? "Candidate").slice(0, 50);
 }
 
+// ─── Batch Cover Letters ─────────────────────────────────────────────────────
+app.post("/api/v2/batch-cover-letters", upload.single("resume"), async (req, res, next) => {
+  try {
+    if (!process.env.ANTHROPIC_API_KEY)
+      return res.status(503).json({ message: "AI features are not configured on this server." });
+
+    let resumeText = "";
+    let candidateName = "the candidate";
+    if (req.file) {
+      const fmt = detectFormat(req.file.mimetype, req.file.originalname);
+      if (fmt) {
+        try {
+          const parsed = await parseResume(req.file.buffer, fmt);
+          resumeText = parsed.text;
+          candidateName = nameFromResumeText(resumeText);
+        } catch { /* continue */ }
+      }
+    }
+
+    const jobDescription  = String(req.body.jobDescription  ?? "").trim();
+    const companiesText   = String(req.body.companiesText   ?? "").trim();
+
+    // Parse "Company - Role" lines (max 10)
+    interface CompanyPair { company: string; role: string }
+    const companies: CompanyPair[] = companiesText
+      .split("\n")
+      .map(l => l.trim())
+      .filter(Boolean)
+      .slice(0, 10)
+      .map(line => {
+        const di = line.indexOf(" - ");
+        if (di > 0) return { company: line.slice(0, di).trim(), role: line.slice(di + 3).trim() };
+        return { company: line.trim(), role: "the position" };
+      })
+      .filter(c => c.company.length > 0);
+
+    if (companies.length === 0)
+      return res.status(400).json({ message: "Provide at least one company in 'Company - Role' format." });
+
+    const client = new Anthropic();
+    const startMs = Date.now();
+
+    interface BatchLetter { company: string; role: string; coverLetter: string; wordCount: number; error?: string }
+    const letters: BatchLetter[] = [];
+
+    for (const { company, role } of companies) {
+      // 30-second per-letter timeout
+      const letterText: string = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => reject(new Error("timeout")), 30_000);
+        client.messages.create({
+          model: "claude-sonnet-4-5",
+          max_tokens: 1024,
+          system: "You are an expert career coach writing professional cover letters.",
+          messages: [{
+            role: "user",
+            content:
+              `Write a professional cover letter for a ${role} position at ${company}.\n` +
+              (resumeText ? `\nResume:\n${resumeText.slice(0, 3000)}\n` : "") +
+              (jobDescription ? `\nJob Description:\n${jobDescription.slice(0, 800)}\n` : "") +
+              `\nRequirements:\n` +
+              `- Formal tone, 250-300 words\n` +
+              `- Highlight 3 most relevant skills matching the role\n` +
+              `- Strong opening hook connecting candidate to ${company}\n` +
+              `- Specific achievements from resume with context\n` +
+              `- Clear call to action in closing\n` +
+              `- Do NOT invent facts not in the resume\n` +
+              `- Return plain text only, no markdown`,
+          }],
+        }).then(msg => {
+          clearTimeout(timer);
+          resolve((msg.content[0] as { type: string; text?: string })?.text?.trim() ?? "");
+        }, err => { clearTimeout(timer); reject(err); });
+      }).catch(e => {
+        return e instanceof Error && e.message === "timeout"
+          ? `[Cover letter for ${company} timed out after 30 seconds. Please try again.]`
+          : "";
+      });
+
+      const wordCount = letterText ? letterText.split(/\s+/).filter(Boolean).length : 0;
+      letters.push({ company, role, coverLetter: letterText, wordCount });
+    }
+
+    const elapsed = Math.round((Date.now() - startMs) / 1000);
+    return res.json({ letters, elapsed, candidateName });
+  } catch (error) { return next(error); }
+});
+
 // ─── Cover Letter: generate using Claude ─────────────────────────────────────
 app.post("/api/v2/cover-letter", upload.single("resume"), async (req, res, next) => {
   try {
@@ -268,10 +355,34 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
       }
     }
 
-    const jobRole       = String(req.body.jobRole       ?? "").trim() || "Software Engineer";
-    const jobDescription = String(req.body.jobDescription ?? "").trim();
-    const interviewType  = String(req.body.interviewType  ?? "Mixed").trim();
-    const questionCount  = Math.min(10, Math.max(3, parseInt(String(req.body.questionCount ?? "5")) || 5));
+    const jobRole        = String(req.body.jobRole        ?? "").trim() || "Software Engineer";
+    const jobDescription  = String(req.body.jobDescription  ?? "").trim();
+    const interviewType   = String(req.body.interviewType   ?? "Mixed").trim();
+    const difficulty      = String(req.body.difficulty      ?? "Intermediate").trim();
+    const targetCompany   = String(req.body.targetCompany   ?? "").trim();
+    const followUps       = req.body.followUps === "true" || req.body.followUps === true;
+    const questionCount   = Math.min(10, Math.max(3, parseInt(String(req.body.questionCount ?? "5")) || 5));
+
+    const DIFF_DESC: Record<string, string> = {
+      "Beginner":     "fundamental concepts, definitions, simple scenarios, basic knowledge checks",
+      "Intermediate": "real project experience, problem-solving, practical application, trade-off analysis",
+      "Advanced":     "system design, architecture decisions, edge cases, deep technical depth, optimisation",
+    };
+    const COMPANY_STYLE: Record<string, string> = {
+      "google":       "Emphasise scalability, data-driven decisions, and Googleyness/culture-fit.",
+      "amazon":       "Heavy focus on Leadership Principles — every behavioural answer must tie to a specific LP.",
+      "microsoft":    "Growth mindset, collaboration, technical depth in chosen domain.",
+      "meta":         "Impact at scale, move fast, data-informed decision making.",
+      "apple":        "Attention to detail, user-first thinking, system coherence.",
+      "tcs":          "Domain certifications, process adherence, breadth of technical skills.",
+      "accenture":    "Client delivery, stakeholder management, cross-functional collaboration.",
+      "infosys":      "Domain expertise, continuous learning, delivery excellence.",
+      "wipro":        "Technical fundamentals, adaptability, client service orientation.",
+      "deloitte":     "Business acumen, consulting skills, risk and compliance awareness.",
+      "mckinsey":     "Structured problem-solving, top-down communication, data-driven insights.",
+    };
+    const companyStyle = COMPANY_STYLE[targetCompany.toLowerCase()] ?? "";
+    const diffDesc = DIFF_DESC[difficulty] ?? DIFF_DESC["Intermediate"]!;
 
     const client = new Anthropic();
     const msg = await client.messages.create({
@@ -280,19 +391,27 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
       messages: [{
         role: "user",
         content:
-          `You are an expert interview coach.\n\n` +
+          `You are an expert ${difficulty} level interview coach${targetCompany ? ` for ${targetCompany} interviews` : ""}.\n\n` +
           `Role: ${jobRole}\n` +
           `Interview type: ${interviewType}\n` +
+          `Difficulty: ${difficulty} — ${diffDesc}\n` +
+          (targetCompany ? `Target Company: ${targetCompany}${companyStyle ? ` — ${companyStyle}` : ""}\n` : "") +
           (jobDescription ? `Job Description: ${jobDescription.slice(0, 1000)}\n` : "") +
           resumeContext + "\n\n" +
           `Generate exactly ${questionCount} mock interview questions with detailed answers.\n\n` +
           `Rules:\n` +
-          `- Technical questions: focus on role-specific skills from the JD\n` +
-          `- Behavioural questions: use STAR format (Situation, Task, Action, Result)\n` +
+          `- Technical questions: focus on role-specific skills; at ${difficulty} level\n` +
+          `- Behavioural questions: STAR format (Situation, Task, Action, Result)\n` +
           `- Mixed: alternate between technical and behavioural\n` +
-          `- If resume provided, tailor questions to the candidate's actual background\n\n` +
-          `Return ONLY a valid JSON array — no markdown, no code fences:\n` +
-          `[{"question":"...","type":"technical|behavioural","keyPoints":["..."],"modelAnswer":"...","tip":"..."}]`,
+          `- Tailor difficulty: ${diffDesc}\n` +
+          (targetCompany && companyStyle ? `- Mirror ${targetCompany} interview style: ${companyStyle}\n` : "") +
+          `- If resume provided, tailor questions to candidate's actual background\n` +
+          (followUps ? `- Include 2 follow-up questions per question — make them progressively harder\n` : "") +
+          `\nReturn ONLY a valid JSON array — no markdown, no code fences:\n` +
+          `[{"question":"...","type":"technical|behavioural","difficulty":"${difficulty}",` +
+          `"keyPoints":["..."],"modelAnswer":"...","tip":"..."` +
+          (followUps ? `,"followUpQuestions":["follow-up 1","follow-up 2"]` : "") +
+          `}]`,
       }],
     });
 
@@ -305,7 +424,7 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
       return res.status(500).json({ message: "AI returned an unexpected format. Please try again." });
     }
 
-    return res.json({ questions, jobRole, interviewType });
+    return res.json({ questions, jobRole, interviewType, difficulty, targetCompany });
   } catch (error) { return next(error); }
 });
 
