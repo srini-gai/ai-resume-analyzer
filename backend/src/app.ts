@@ -361,7 +361,7 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
     const difficulty      = String(req.body.difficulty      ?? "Intermediate").trim();
     const targetCompany   = String(req.body.targetCompany   ?? "").trim();
     const followUps       = req.body.followUps === "true" || req.body.followUps === true;
-    const questionCount   = Math.min(10, Math.max(3, parseInt(String(req.body.questionCount ?? "5")) || 5));
+    const questionCount   = Math.min(3, Math.max(1, parseInt(String(req.body.questionCount ?? "5")) || 5));
 
     const DIFF_DESC: Record<string, string> = {
       "Beginner":     "fundamental concepts, definitions, simple scenarios, basic knowledge checks",
@@ -387,7 +387,7 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
     const client = new Anthropic();
     const msg = await client.messages.create({
       model: "claude-sonnet-4-5",
-      max_tokens: 4096,
+      max_tokens: 2500,
       messages: [{
         role: "user",
         content:
