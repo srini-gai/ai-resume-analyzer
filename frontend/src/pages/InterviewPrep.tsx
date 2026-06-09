@@ -74,8 +74,14 @@ export default function InterviewPrep({ onBack }: { onBack: () => void }) {
       body.append("questionCount", String(questionCount));
 
       const res = await fetch(`${apiUrl}/api/v2/interview-prep`, { method: "POST", body });
-      const data = await res.json() as PrepResult & { message?: string };
-      if (!res.ok) throw new Error(data.message ?? "Generation failed.");
+      if (!res.ok) {
+        // Read as text first — non-ok responses may be HTML (nginx error page), not JSON
+        const text = await res.text();
+        let msg = "Generation failed. Please try again.";
+        try { msg = (JSON.parse(text) as { message?: string }).message ?? msg; } catch { /* was HTML */ }
+        throw new Error(msg);
+      }
+      const data = await res.json() as PrepResult;
       setResult(data);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not connect to the server.");

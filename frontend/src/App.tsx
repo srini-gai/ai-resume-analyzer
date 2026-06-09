@@ -212,9 +212,12 @@ export default function App() {
     </main>
   );
 
-  if (view === "builder")       return toolShell(<ResumeBuilder   onBack={() => setView("analyze")} />);
-  if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={() => setView("analyze")} />);
-  if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={() => setView("analyze")} />);
+  // Navigate back to analyzer, scroll to top so any existing result is immediately visible
+  const goBackToAnalyze = () => { setView("analyze"); window.scrollTo({ top: 0, behavior: "smooth" }); };
+
+  if (view === "builder")       return toolShell(<ResumeBuilder   onBack={goBackToAnalyze} />);
+  if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={goBackToAnalyze} />);
+  if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={goBackToAnalyze} />);
 
   return (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
