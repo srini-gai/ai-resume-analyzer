@@ -344,13 +344,13 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
     if (!process.env.ANTHROPIC_API_KEY)
       return res.status(503).json({ message: "AI features are not configured on this server." });
 
-    let resumeContext = "";
+    let resumeText = "";
     if (req.file) {
       const fmt = detectFormat(req.file.mimetype, req.file.originalname);
       if (fmt) {
         try {
           const parsed = await parseResume(req.file.buffer, fmt);
-          resumeContext = `\nCandidate Resume (use to tailor questions):\n${parsed.text.slice(0, 2000)}`;
+          resumeText = parsed.text.slice(0, 3000);
         } catch { /* continue without resume */ }
       }
     }
@@ -384,34 +384,50 @@ app.post("/api/v2/interview-prep", upload.single("resume"), async (req, res, nex
     const companyStyle = COMPANY_STYLE[targetCompany.toLowerCase()] ?? "";
     const diffDesc = DIFF_DESC[difficulty] ?? DIFF_DESC["Intermediate"]!;
 
+    const jsonSchema =
+      `[{"question":"...","type":"technical|behavioural","difficulty":"${difficulty}",` +
+      `"keyPoints":["..."],"modelAnswer":"...","tip":"..."` +
+      (followUps ? `,"followUpQuestions":["follow-up 1","follow-up 2"]` : "") +
+      `}]`;
+
+    const promptContent = resumeText
+      ? `You are an expert interview coach reviewing this candidate's actual resume for a ${jobRole} position` +
+        (targetCompany ? ` at ${targetCompany}` : "") + `.\n\n` +
+        `Candidate's Resume:\n${resumeText}\n\n` +
+        (jobDescription ? `Job Description: ${jobDescription.slice(0, 1000)}\n` : "") +
+        `Difficulty: ${difficulty}\n\n` +
+        `Generate exactly ${questionCount} interview questions that reference the candidate's SPECIFIC experience. For example:\n` +
+        `- 'You mentioned working on [specific project from resume] — walk me through your approach to...'\n` +
+        `- 'Your resume shows [X years/skill from resume] — describe a situation where...'\n\n` +
+        `Questions must reference actual companies, roles, projects, technologies from the resume. Do NOT ask generic questions if a resume is provided.\n` +
+        (targetCompany && companyStyle ? `Mirror ${targetCompany} interview style: ${companyStyle}\n` : "") +
+        (followUps ? `Include 2 follow-up questions per question — make them progressively harder.\n` : "") +
+        `\nReturn ONLY a valid JSON array — no markdown, no code fences:\n` +
+        jsonSchema
+      : `You are an expert ${difficulty} level interview coach${targetCompany ? ` for ${targetCompany} interviews` : ""}.\n\n` +
+        `Role: ${jobRole}\n` +
+        `Interview type: ${interviewType}\n` +
+        `Difficulty: ${difficulty} — ${diffDesc}\n` +
+        (targetCompany ? `Target Company: ${targetCompany}${companyStyle ? ` — ${companyStyle}` : ""}\n` : "") +
+        (jobDescription ? `Job Description: ${jobDescription.slice(0, 1000)}\n` : "") +
+        `\nGenerate exactly ${questionCount} mock interview questions with detailed answers.\n\n` +
+        `Rules:\n` +
+        `- Technical questions: focus on role-specific skills; at ${difficulty} level\n` +
+        `- Behavioural questions: STAR format (Situation, Task, Action, Result)\n` +
+        `- Mixed: alternate between technical and behavioural\n` +
+        `- Tailor difficulty: ${diffDesc}\n` +
+        (targetCompany && companyStyle ? `- Mirror ${targetCompany} interview style: ${companyStyle}\n` : "") +
+        (followUps ? `- Include 2 follow-up questions per question — make them progressively harder\n` : "") +
+        `\nReturn ONLY a valid JSON array — no markdown, no code fences:\n` +
+        jsonSchema;
+
     const client = new Anthropic();
     const msg = await client.messages.create({
       model: "claude-sonnet-4-5",
       max_tokens: 2500,
       messages: [{
         role: "user",
-        content:
-          `You are an expert ${difficulty} level interview coach${targetCompany ? ` for ${targetCompany} interviews` : ""}.\n\n` +
-          `Role: ${jobRole}\n` +
-          `Interview type: ${interviewType}\n` +
-          `Difficulty: ${difficulty} — ${diffDesc}\n` +
-          (targetCompany ? `Target Company: ${targetCompany}${companyStyle ? ` — ${companyStyle}` : ""}\n` : "") +
-          (jobDescription ? `Job Description: ${jobDescription.slice(0, 1000)}\n` : "") +
-          resumeContext + "\n\n" +
-          `Generate exactly ${questionCount} mock interview questions with detailed answers.\n\n` +
-          `Rules:\n` +
-          `- Technical questions: focus on role-specific skills; at ${difficulty} level\n` +
-          `- Behavioural questions: STAR format (Situation, Task, Action, Result)\n` +
-          `- Mixed: alternate between technical and behavioural\n` +
-          `- Tailor difficulty: ${diffDesc}\n` +
-          (targetCompany && companyStyle ? `- Mirror ${targetCompany} interview style: ${companyStyle}\n` : "") +
-          `- If resume provided, tailor questions to candidate's actual background\n` +
-          (followUps ? `- Include 2 follow-up questions per question — make them progressively harder\n` : "") +
-          `\nReturn ONLY a valid JSON array — no markdown, no code fences:\n` +
-          `[{"question":"...","type":"technical|behavioural","difficulty":"${difficulty}",` +
-          `"keyPoints":["..."],"modelAnswer":"...","tip":"..."` +
-          (followUps ? `,"followUpQuestions":["follow-up 1","follow-up 2"]` : "") +
-          `}]`,
+        content: promptContent,
       }],
     });
 

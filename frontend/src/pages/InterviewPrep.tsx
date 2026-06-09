@@ -242,6 +242,15 @@ export default function InterviewPrep({ onBack }: { onBack: () => void }) {
               <X size={12} /> Remove
             </button>
           )}
+          {file ? (
+            <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-amber-600 dark:text-amber-400">
+              <span>✦</span> Resume-aware — questions tailored to your experience
+            </p>
+          ) : (
+            <p className="mt-2 text-xs text-slate-400 dark:text-slate-500">
+              Upload resume for personalised questions
+            </p>
+          )}
         </div>
 
         {/* Row 1: Role / Difficulty / Type */}
