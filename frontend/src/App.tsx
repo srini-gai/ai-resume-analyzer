@@ -90,6 +90,8 @@ export default function App() {
   const [downloadingPdf, setDownloadingPdf] = useState(false);
   const [downloadingDocx, setDownloadingDocx] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [avatarOpen, setAvatarOpen] = useState(false);
+  const avatarRef = useRef<HTMLDivElement>(null);
 
   // Auth
   const [authState, setAuthState] = useState<AuthState>({ type: "loading" });
@@ -208,7 +210,7 @@ export default function App() {
           setAuthState({ type: "unauthenticated", error: oauthError ?? undefined });
         }
       })
-      .catch(() => setAuthState({ type: "no_auth" }));
+      .catch(() => setAuthState({ type: "unauthenticated" }));
   }, []);
 
   // ── Load analysis history after auth ──────────────────────────────────────
@@ -236,6 +238,18 @@ export default function App() {
     }
     return () => { if (loadingRef.current) clearInterval(loadingRef.current); };
   }, [loading]);
+
+  // Close avatar dropdown on outside click
+  useEffect(() => {
+    if (!avatarOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (avatarRef.current && !avatarRef.current.contains(e.target as Node)) {
+        setAvatarOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [avatarOpen]);
 
   const selectFile = (candidate?: File) => {
     setError("");
@@ -341,26 +355,54 @@ export default function App() {
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-violet-500/20 hover:brightness-110 transition">
             <Layers size={13} /> Batch Apply
           </button>
-          {isAdmin && (
-            <button onClick={() => navigate("/admin")}
-              className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition">
-              <ShieldAlert size={13} /> Admin
-            </button>
-          )}
           <ThemeToggle dark={dark} toggle={() => setDark(!dark)} />
           {authState.type === "authenticated" && (
-            <div className="flex items-center gap-2 pl-1">
-              {authState.user.avatar_url ? (
-                <img src={authState.user.avatar_url} alt="" className="size-7 rounded-full ring-2 ring-indigo-500/40" />
-              ) : (
-                <div className="grid size-7 place-items-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-400">
-                  {(authState.user.name ?? authState.user.email)[0]?.toUpperCase()}
-                </div>
-              )}
-              <button onClick={logout} title="Sign out"
-                className="grid size-7 place-items-center rounded-lg border border-slate-200 bg-white text-slate-500 hover:text-rose-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 transition">
-                <LogOut size={13} />
+            <div ref={avatarRef} className="relative pl-1">
+              <button
+                onClick={() => setAvatarOpen(o => !o)}
+                className="flex size-8 items-center justify-center rounded-full ring-2 ring-indigo-500/40 ring-offset-2 ring-offset-transparent transition hover:ring-indigo-500/70 focus:outline-none"
+                title={authState.user.name ?? authState.user.email}
+              >
+                {authState.user.avatar_url ? (
+                  <img src={authState.user.avatar_url} alt="" className="size-8 rounded-full" />
+                ) : (
+                  <div className="grid size-8 place-items-center rounded-full bg-indigo-500/20 text-xs font-bold text-indigo-400">
+                    {(authState.user.name ?? authState.user.email)[0]?.toUpperCase()}
+                  </div>
+                )}
               </button>
+              <AnimatePresence>
+                {avatarOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: -6, scale: 0.96 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -6, scale: 0.96 }}
+                    transition={{ duration: 0.12 }}
+                    className="absolute right-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <div className="border-b border-slate-100 px-3 py-2.5 dark:border-slate-800">
+                      <p className="truncate text-xs font-semibold text-slate-800 dark:text-slate-200">
+                        {authState.user.name ?? "Signed in"}
+                      </p>
+                      <p className="truncate text-[11px] text-slate-400">{authState.user.email}</p>
+                    </div>
+                    {isAdmin && (
+                      <button
+                        onClick={() => { navigate("/admin"); setAvatarOpen(false); }}
+                        className="flex w-full items-center gap-2 px-3 py-2.5 text-sm text-slate-700 transition hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"
+                      >
+                        <ShieldAlert size={14} className="text-indigo-500" /> Admin Panel
+                      </button>
+                    )}
+                    <button
+                      onClick={() => { logout(); setAvatarOpen(false); }}
+                      className="flex w-full items-center gap-2 px-3 py-2.5 text-sm text-rose-600 transition hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-500/10"
+                    >
+                      <LogOut size={14} /> Sign Out
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           )}
         </div>
@@ -391,9 +433,7 @@ export default function App() {
                 { label: "Cover Letter",   path: "/cover-letter",   cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
                 { label: "Interview Prep", path: "/interview-prep", cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
                 { label: "Batch Apply",    path: "/batch-apply",    cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
-                ...(isAdmin
-                  ? [{ label: "Admin", path: "/admin", cls: "from-slate-600 to-slate-700", icon: <ShieldAlert size={14} /> }]
-                  : []),
+                ...(isAdmin ? [{ label: "Admin Panel", path: "/admin", cls: "from-slate-600 to-slate-700", icon: <ShieldAlert size={14} /> }] : []),
               ].map(item => (
                 <button key={item.label}
                   onClick={() => { navigate(item.path); setMenuOpen(false); }}
