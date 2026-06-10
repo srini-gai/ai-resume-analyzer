@@ -1,7 +1,5 @@
 import type { AnalysisResult } from "./analyzer.js";
-import {
-  detectDomain, DOMAIN_CERTS,
-} from "./skill-matcher.js";
+import { DOMAIN_CERTS } from "./skill-matcher.js";
 
 export interface GapSkillRow {
   skill: string;
@@ -117,9 +115,20 @@ export function buildGapAnalysis(
     }
   }
 
-  // JD keywords absent from resume
+  // JD keywords absent from resume — filter out generic/weak words
+  const WEAK_KEYWORDS = new Set([
+    "every","work","team","where","create","across","driving","including",
+    "role","their","that","with","this","from","have","will","your","they",
+    "also","more","some","been","what","when","into","such","each","than",
+    "then","these","those","both","well","much","many","need","make","take",
+    "come","like","just","know","time","year","good","look","want","give",
+    "use","see","him","two","how","its","our","out","who","get","can","her",
+    "all","new","one","way","may","now","day","did","not","but","the","and",
+    "for","are","was","his","has","had","able","best","help","high","must",
+    "within","while","other","about","after","would","could","should","being",
+  ]);
   const absentKeywords = keywordDensity
-    .filter(r => !r.present && r.count >= 2)
+    .filter(r => !r.present && r.count >= 2 && !WEAK_KEYWORDS.has(r.keyword) && r.keyword.length > 4)
     .slice(0, 2);
   for (const { keyword } of absentKeywords) {
     actionItems.push(`Incorporate "${keyword}" naturally in your Experience section to align with JD vocabulary.`);
@@ -144,8 +153,11 @@ export function buildGapAnalysis(
 
   // ── Recommended certifications — domain-aware ────────────────────────────────
   // Use Claude-detected domain from Phase 1 if available, else regex fallback
-  const domain = (analysis.domain as import("./skill-matcher.js").Domain | undefined) ?? detectDomain(resumeText, jobDescription);
-  const recommendedCertifications = (DOMAIN_CERTS[domain] ?? DOMAIN_CERTS.general).slice(0, 5);
+  // Use Claude Pass 1 domain directly — never re-run regex detectDomain
+  // which misfires on BFSI client history (returns "finance" for a TPM/PM)
+  const claudeDomain = analysis.domain as keyof typeof DOMAIN_CERTS | undefined;
+  const certDomain = (claudeDomain && DOMAIN_CERTS[claudeDomain]) ? claudeDomain : "general";
+  const recommendedCertifications = DOMAIN_CERTS[certDomain].slice(0, 5);
 
   // ── Experience gaps — always populated, never "No major gaps" unless 95%+ ───
   const experienceGaps: string[] = [];
