@@ -3,19 +3,21 @@ services:
     image: postgres:16-alpine
     restart: unless-stopped
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-resumeiq}
-      POSTGRES_USER: ${POSTGRES_USER:-resumeiq}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: resumeiq
+      POSTGRES_USER: resumeiq
+      POSTGRES_PASSWORD: "Shambo125$"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-resumeiq} -d ${POSTGRES_DB:-resumeiq}"]
+      test: ["CMD-SHELL", "pg_isready -U resumeiq -d resumeiq"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
     expose:
       - "5432"
+    networks:
+      - internal
 
   backend:
     build:
@@ -34,21 +36,42 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    networks:
+      - internal
 
   frontend:
     build:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        VITE_API_URL: ""
+        VITE_API_URL: "https://resumeanalyzer.pro"
     restart: unless-stopped
-    ports:
-      - "127.0.0.1:3000:80"   # Only accessible locally — system nginx proxies to this
     volumes:
       - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - internal
+      - n8n_default
     depends_on:
       backend:
         condition: service_healthy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=n8n_default"
+      - "traefik.http.routers.resumeanalyzer.rule=Host(`resumeanalyzer.pro`) || Host(`www.resumeanalyzer.pro`)"
+      - "traefik.http.routers.resumeanalyzer.entrypoints=websecure"
+      - "traefik.http.routers.resumeanalyzer.tls=true"
+      - "traefik.http.routers.resumeanalyzer.tls.certresolver=mytlschallenge"
+      - "traefik.http.services.resumeanalyzer.loadbalancer.server.port=80"
+      - "traefik.http.routers.resumeanalyzer-http.rule=Host(`resumeanalyzer.pro`) || Host(`www.resumeanalyzer.pro`)"
+      - "traefik.http.routers.resumeanalyzer-http.entrypoints=web"
+      - "traefik.http.routers.resumeanalyzer-http.middlewares=resumeanalyzer-https"
+      - "traefik.http.middlewares.resumeanalyzer-https.redirectscheme.scheme=https"
+
+networks:
+  internal:
+    driver: bridge
+  n8n_default:
+    external: true
 
 volumes:
   postgres_data:
