@@ -1,8 +1,9 @@
 import { useEffect, useState, useRef, type FormEvent, type ReactNode } from "react";
+import { Routes, Route, Navigate, useNavigate } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   FileSearch, LoaderCircle, ShieldCheck, Sparkles, UploadCloud, X,
-  CheckCircle2, AlertCircle, FileText, Wand2, Download,
+  CheckCircle2, AlertCircle, FileText, Wand2,
   Mail, MessageSquare, Menu, Layers, LogOut, ShieldAlert, History,
 } from "lucide-react";
 import { ThemeToggle } from "./components/ThemeToggle";
@@ -73,12 +74,11 @@ const LOADING_STEPS = [
 // Light: solid white card with subtle shadow. Dark: deep navy card with border.
 const cardCls = "rounded-2xl border border-slate-200 bg-white shadow-card dark:border-slate-700/60 dark:bg-slate-900";
 
-type View = "analyze" | "builder" | "cover-letter" | "interview-prep" | "batch-apply" | "admin";
 type Tab = "analysis" | "optimized" | "report";
 
 export default function App() {
+  const navigate = useNavigate();
   const [dark, setDark] = useState(true);
-  const [view, setView] = useState<View>("analyze");
   const [file, setFile] = useState<File | null>(null);
   const [jobDescription, setJobDescription] = useState("");
   const [loading, setLoading] = useState(false);
@@ -290,8 +290,7 @@ export default function App() {
     </main>
   );
 
-  // Navigate back to analyzer, scroll to top so any existing result is immediately visible
-  const goBackToAnalyze = () => { setView("analyze"); window.scrollTo({ top: 0, behavior: "smooth" }); };
+  const goToApp = () => { navigate("/app"); window.scrollTo({ top: 0, behavior: "smooth" }); };
 
   // ── Auth gates ──────────────────────────────────────────────────────────────
   if (authState.type === "loading") {
@@ -302,22 +301,18 @@ export default function App() {
     );
   }
 
-  if (authState.type === "unauthenticated") {
-    // OAuth error returned → show sign-in card; otherwise show full landing page
-    return authState.error ? <Login error={authState.error} /> : <Landing />;
-  }
-
   if (authState.type === "pending") {
     return <Login user={authState.user} onLogout={logout} />;
   }
 
-  if (view === "builder")       return toolShell(<ResumeBuilder   onBack={goBackToAnalyze} />);
-  if (view === "cover-letter")  return toolShell(<CoverLetter     onBack={goBackToAnalyze} />);
-  if (view === "interview-prep")return toolShell(<InterviewPrep   onBack={goBackToAnalyze} />);
-  if (view === "batch-apply")   return toolShell(<BatchApply      onBack={goBackToAnalyze} />);
-  if (view === "admin")         return toolShell(<Admin           onBack={goBackToAnalyze} />);
+  const isAuthenticated = authState.type === "authenticated" || authState.type === "no_auth";
+  const userName = authState.type === "authenticated" ? authState.user.name : null;
+  const isAdmin = authState.type === "authenticated" && authState.user.isAdmin;
+  const oauthError = authState.type === "unauthenticated" ? authState.error : undefined;
 
-  return (
+  const guard = (el: ReactNode) => isAuthenticated ? el : <Navigate to="/" replace />;
+
+  const analyzeView = (
     <main className={`min-h-screen ${bgCls} text-slate-950 transition-colors dark:text-white`}>
       {dark && <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(ellipse_at_20%_0%,rgba(99,102,241,.25),transparent_50%),radial-gradient(ellipse_at_80%_20%,rgba(139,92,246,.15),transparent_50%)]" />}
 
@@ -330,24 +325,24 @@ export default function App() {
 
         {/* Desktop nav */}
         <div className="hidden items-center gap-2 sm:flex">
-          <button onClick={() => setView("builder")}
+          <button onClick={() => navigate("/build-resume")}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-indigo-600 to-violet-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-indigo-500/20 hover:brightness-110 transition">
             <FileText size={13} /> Build Resume
           </button>
-          <button onClick={() => setView("cover-letter")}
+          <button onClick={() => navigate("/cover-letter")}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-teal-500/20 hover:brightness-110 transition">
             <Mail size={13} /> Cover Letter
           </button>
-          <button onClick={() => setView("interview-prep")}
+          <button onClick={() => navigate("/interview-prep")}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-amber-500 to-orange-500 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-amber-500/20 hover:brightness-110 transition">
             <MessageSquare size={13} /> Interview Prep
           </button>
-          <button onClick={() => setView("batch-apply")}
+          <button onClick={() => navigate("/batch-apply")}
             className="flex items-center gap-1.5 rounded-2xl bg-gradient-to-r from-violet-600 to-purple-600 px-3.5 py-2 text-xs font-bold text-white shadow-lg shadow-violet-500/20 hover:brightness-110 transition">
             <Layers size={13} /> Batch Apply
           </button>
-          {authState.type === "authenticated" && authState.user.isAdmin && (
-            <button onClick={() => setView("admin")}
+          {isAdmin && (
+            <button onClick={() => navigate("/admin")}
               className="flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-bold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700 transition">
               <ShieldAlert size={13} /> Admin
             </button>
@@ -392,16 +387,16 @@ export default function App() {
               className="absolute left-0 right-0 top-full z-50 flex flex-col gap-2 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-700 dark:bg-slate-900 sm:hidden"
             >
               {[
-                { label: "Build Resume",   view: "builder"        as View, cls: "from-indigo-600 to-violet-500", icon: <FileText size={14} /> },
-                { label: "Cover Letter",   view: "cover-letter"   as View, cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
-                { label: "Interview Prep", view: "interview-prep" as View, cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
-                { label: "Batch Apply",    view: "batch-apply"    as View, cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
-                ...(authState.type === "authenticated" && authState.user.isAdmin
-                  ? [{ label: "Admin", view: "admin" as View, cls: "from-slate-600 to-slate-700", icon: <ShieldAlert size={14} /> }]
+                { label: "Build Resume",   path: "/build-resume",   cls: "from-indigo-600 to-violet-500", icon: <FileText size={14} /> },
+                { label: "Cover Letter",   path: "/cover-letter",   cls: "from-teal-500 to-emerald-500",  icon: <Mail size={14} /> },
+                { label: "Interview Prep", path: "/interview-prep", cls: "from-amber-500 to-orange-500",  icon: <MessageSquare size={14} /> },
+                { label: "Batch Apply",    path: "/batch-apply",    cls: "from-violet-600 to-purple-600", icon: <Layers size={14} /> },
+                ...(isAdmin
+                  ? [{ label: "Admin", path: "/admin", cls: "from-slate-600 to-slate-700", icon: <ShieldAlert size={14} /> }]
                   : []),
               ].map(item => (
                 <button key={item.label}
-                  onClick={() => { setView(item.view); setMenuOpen(false); }}
+                  onClick={() => { navigate(item.path); setMenuOpen(false); }}
                   className={`flex items-center gap-2 rounded-2xl bg-gradient-to-r ${item.cls} px-4 py-2.5 text-sm font-bold text-white`}>
                   {item.icon} {item.label}
                 </button>
@@ -773,5 +768,22 @@ export default function App() {
         </div>
       </div>
     </main>
+  );
+
+  return (
+    <Routes>
+      <Route path="/" element={
+        oauthError
+          ? <Login error={oauthError} />
+          : <Landing isAuthenticated={isAuthenticated} userName={userName} onGoToApp={goToApp} />
+      } />
+      <Route path="/app"           element={guard(analyzeView)} />
+      <Route path="/build-resume"  element={guard(toolShell(<ResumeBuilder   onBack={goToApp} />))} />
+      <Route path="/cover-letter"  element={guard(toolShell(<CoverLetter     onBack={goToApp} />))} />
+      <Route path="/interview-prep"element={guard(toolShell(<InterviewPrep   onBack={goToApp} />))} />
+      <Route path="/batch-apply"   element={guard(toolShell(<BatchApply      onBack={goToApp} />))} />
+      <Route path="/admin"         element={guard(toolShell(<Admin           onBack={goToApp} />))} />
+      <Route path="*"              element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }

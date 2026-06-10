@@ -4,6 +4,7 @@ import passport from "passport";
 import { Strategy as GoogleStrategy, type Profile } from "passport-google-oauth20";
 import jwt from "jsonwebtoken";
 import { query } from "./db.js";
+import { sendWaitlistNotification } from "./mailer.js";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -156,6 +157,7 @@ authRouter.get(
         status: string;
         name: string | null;
         avatar_url: string | null;
+        last_login: string | null;
       }>(
         `INSERT INTO users (email, name, avatar_url, google_id)
          VALUES ($1, $2, $3, $4)
@@ -164,7 +166,7 @@ authRouter.get(
                avatar_url = EXCLUDED.avatar_url,
                google_id = EXCLUDED.google_id,
                last_login = NOW()
-         RETURNING id, status, name, avatar_url`,
+         RETURNING id, status, name, avatar_url, last_login`,
         [
           email,
           profile.displayName ?? null,
@@ -175,6 +177,13 @@ authRouter.get(
 
       const user = result.rows[0];
       if (!user) throw new Error("User upsert failed");
+
+      // last_login is NULL for brand-new users (INSERT) — send waitlist emails
+      const isNewUser = user.last_login === null && user.status === "pending";
+      if (isNewUser) {
+        sendWaitlistNotification({ id: user.id, email, name: user.name })
+          .catch(e => console.error("Waitlist email notification failed:", e));
+      }
 
       if (user.status === "blocked") {
         res.redirect(`${frontendUrl()}?error=blocked`);
