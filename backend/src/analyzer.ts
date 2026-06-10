@@ -114,7 +114,17 @@ RULES:
    - "Programme Manager" / "Program Manager" -> "Programme Management"
    - "SAP GRC Access Control" / "GRC" / "Access Control 12.0" -> "SAP GRC"
    - "SoD" / "Segregation of Duties" -> "SoD Analysis"
-4. Domain: choose ONE: sap | pm | cloud | data | devops | security | finance | healthcare | general
+4. Domain: choose ONE based on the candidate's JOB FUNCTION, not their client's industry:
+   sap | pm | tpm | cloud | data | devops | security | fintech | ai-strategy | eng-mgmt | finance | healthcare | general
+   CRITICAL RULES for domain detection:
+   - A Programme Director who worked AT banks = "pm" (their function), NOT "finance" (client industry)
+   - A TPM working ON cloud infrastructure = "tpm", NOT "cloud"
+   - A Data Engineer working FOR a fintech = "data", NOT "fintech"
+   - "finance" = only if the candidate IS a financial analyst, trader, CFO, or finance professional themselves
+   - "fintech" = product/strategy/delivery leader at a fintech company (their role is business/product, not engineering)
+   - "tpm" = Technical Programme/Project/Product Manager with engineering background managing cross-functional technical programmes
+   - "ai-strategy" = AI transformation leader, Chief AI Officer, Head of AI, enterprise AI programme lead
+   - "eng-mgmt" = Engineering Manager, Director of Engineering, VP Engineering managing engineering teams
 5. Seniority:
    - executive: Director, VP, Programme Director, Head of, C-level, large budget ownership
    - senior: Lead, Senior, Principal, 8+ years, team of 5+, architecture ownership
