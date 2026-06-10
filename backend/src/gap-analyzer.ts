@@ -1,6 +1,5 @@
 import type { AnalysisResult } from "./analyzer.js";
 import {
-  extractSkillsFromJD, semanticMatch, deduplicateSkills,
   detectDomain, DOMAIN_CERTS,
 } from "./skill-matcher.js";
 
@@ -75,18 +74,23 @@ export function buildGapAnalysis(
     (missingSkills.length > 0 ? missingSkills.slice(0, 4).join(", ") : "none identified") + ".";
 
   // ── Skills table (JD-driven, not static list) ────────────────────────────────
-  const jdSkills = deduplicateSkills(extractSkillsFromJD(jobDescription));
-  const skillsTable: GapSkillRow[] = jdSkills.map(skill => {
-    const present = semanticMatch(skill, resumeText);
-    const category: GapSkillRow["category"] = present ? "matched" : "missing";
-    return { skill, required: true, present, category };
-  });
-
-  // Also surface resume skills not in JD as "bonus"
-  const bonusSkills = matchedSkills.filter(s => !semanticMatch(s, jobDescription)).slice(0, 5);
-  for (const skill of bonusSkills) {
-    skillsTable.push({ skill, required: false, present: true, category: "bonus" });
-  }
+  // Skills table: use Claude Pass 2 matched/missing lists directly.
+  // Re-running regex extraction here produces false positives (e.g. "IT Security"
+  // flagged as missing for a 21-year SAP Security consultant). Trust Claude output.
+  const skillsTable: GapSkillRow[] = [
+    ...matchedSkills.map(skill => ({
+      skill,
+      required: true,
+      present: true,
+      category: "matched" as GapSkillRow["category"],
+    })),
+    ...missingSkills.map(skill => ({
+      skill,
+      required: true,
+      present: false,
+      category: "missing" as GapSkillRow["category"],
+    })),
+  ];
 
   // ── Keyword density — two-column: JD count vs resume count ──────────────────
   const jdWords = jobDescription.toLowerCase().split(/\W+/).filter(w => w.length > 3 && !STOP_WORDS.has(w));
@@ -126,14 +130,16 @@ export function buildGapAnalysis(
     actionItems.push("Align your Professional Summary opening line with the exact role title in the JD.");
   }
 
-  if (analysis.stats.actionVerbs < 5) {
-    actionItems.push("Start each Experience bullet with a strong action verb: Spearheaded, Orchestrated, Delivered, Configured, Implemented.");
+
+
+  // Only add heading tip if sections are genuinely missing (not just a formatting issue)
+  if (analysis.stats.sectionsFound < 3) {
+    actionItems.push("Add clear ATS-friendly section headings: Summary, Skills, Experience, Education, Certifications.");
   }
 
-  actionItems.push("Ensure ATS-friendly section headings: Summary, Skills, Experience, Education, Certifications.");
-
   // ── Recommended certifications — domain-aware ────────────────────────────────
-  const domain = detectDomain(resumeText, jobDescription);
+  // Use Claude-detected domain from Phase 1 if available, else regex fallback
+  const domain = (analysis.domain as import("./skill-matcher.js").Domain | undefined) ?? detectDomain(resumeText, jobDescription);
   const recommendedCertifications = (DOMAIN_CERTS[domain] ?? DOMAIN_CERTS.general).slice(0, 5);
 
   // ── Experience gaps — always populated, never "No major gaps" unless 95%+ ───
