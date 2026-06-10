@@ -6,7 +6,7 @@ import multer from "multer";
 import cookieParser from "cookie-parser";
 import passport from "passport";
 import Anthropic from "@anthropic-ai/sdk";
-import { analyzeResume } from "./analyzer.js";
+import { analyzeResume, analyzeResumeSync } from "./analyzer.js";
 import { rewriteResume } from "./ai-rewriter.js";
 import { buildGapAnalysis } from "./gap-analyzer.js";
 import { editPdfInPlace } from "./pdf-editor.js";
@@ -69,7 +69,7 @@ app.post("/api/analyze", upload.single("resume"), async (req, res, next) => {
     if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    return res.json(analyzeResume(parsed.text, jobDescription));
+    return res.json(analyzeResumeSync(parsed.text, jobDescription));
   } catch (error) {
     return next(error);
   }
@@ -82,7 +82,7 @@ app.post("/api/v2/analyze", upload.single("resume"), async (req, res, next) => {
     if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    const baseResult = analyzeResume(parsed.text, jobDescription);
+    const baseResult = await analyzeResume(parsed.text, jobDescription);
     const [optimizedResume, gapAnalysis] = await Promise.all([
       rewriteResume(parsed.text, jobDescription, baseResult),
       Promise.resolve(buildGapAnalysis(parsed.text, jobDescription, baseResult)),
@@ -115,7 +115,7 @@ app.post("/api/v2/optimized-pdf", upload.single("resume"), async (req, res, next
     if ("error" in parsed) return res.status(parsed.status).json({ message: parsed.error });
     const jobDescription = String(req.body.jobDescription ?? "").trim();
     if (jobDescription.length < 40) return res.status(400).json({ message: "Job description must be at least 40 characters." });
-    const baseResult = analyzeResume(parsed.text, jobDescription);
+    const baseResult = analyzeResumeSync(parsed.text, jobDescription);
     const optimizedResume = await rewriteResume(parsed.text, jobDescription, baseResult);
 
     let outputBuffer: Buffer;

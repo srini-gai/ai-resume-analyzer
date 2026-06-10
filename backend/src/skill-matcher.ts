@@ -190,13 +190,13 @@ export function detectDomain(resumeText: string, jdText: string): Domain {
 
   const signals: [Domain, RegExp][] = [
     ["sap",      /\b(sap|grc|hana|fiori|ariba|abap|pfcg|eam|arm|brm|msmp|vistex|s4hana|s\/4hana)\b/g],
-    ["finance",  /\b(cpa|cfa|frm|ifrs|gaap|treasury|banking|investment|equity|portfolio|accounts receivable|accounts payable|financial modeling)\b/g],
+    ["finance",  /\b(cpa|cfa|frm|ifrs|gaap|treasury|equity portfolio|accounts receivable|accounts payable|financial modeling|financial analyst|investment banking|asset management)\b/g],
     ["cloud",    /\b(aws|azure|gcp|lambda|terraform|serverless|cloud infrastructure)\b/g],
     ["ml-data",  /\b(machine learning|deep learning|neural|tensorflow|pytorch|scikit|nlp|data science|analytics|tableau|spark|hadoop)\b/g],
     ["frontend", /\b(react|angular|vue|frontend|front-end|html|css|tailwind|nextjs|ux design|figma)\b/g],
     ["backend",  /\b(node|express|django|spring boot|microservices|postgresql|mongodb|redis|graphql)\b/g],
     ["devops",   /\b(devops|ci\/cd|jenkins|ansible|kubernetes|docker|monitoring|observability)\b/g],
-    ["pm",       /\b(program manager|pmo|stakeholder management|roadmap|sprint planning|scrum master|jira|safe agile|delivery manager)\b/g],
+    ["pm",       /\b(program manager|programme manager|programme director|pmo|stakeholder management|roadmap|sprint planning|scrum master|jira|safe agile|delivery manager|delivery lead|pi planning|agile transformation|it programme|it program|lead consultant|project director|portfolio manager|change manager)\b/g],
     ["security", /\b(cybersecurity|penetration testing|vulnerability|siem|cissp|cism|cisa|soc analyst|threat modeling)\b/g],
     ["healthcare",/\b(healthcare|hipaa|clinical|ehr|hospital|pharma|biotech|fda|patient data)\b/g],
   ];

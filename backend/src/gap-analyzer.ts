@@ -107,9 +107,14 @@ export function buildGapAnalysis(
   // ── Action items — JD-specific, never generic ────────────────────────────────
   const actionItems: string[] = [];
 
-  // Specific missing skills
+  // Specific missing skills — advice is seniority-aware
+  const isExecutive = analysis.seniorityLevel === "executive" || analysis.seniorityLevel === "senior";
   for (const skill of missingSkills.slice(0, 3)) {
-    actionItems.push(`Add "${skill}" to your Skills section — explicitly required by this JD.`);
+    if (isExecutive) {
+      actionItems.push(`Surface evidence of "${skill}" in your Experience section — reference a specific project, client, or delivery where this was applied.`);
+    } else {
+      actionItems.push(`Add "${skill}" to your Skills section — explicitly required by this JD.`);
+    }
   }
 
   // JD keywords absent from resume
