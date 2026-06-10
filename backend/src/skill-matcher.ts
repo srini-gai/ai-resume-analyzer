@@ -183,7 +183,8 @@ export function extractSkillsFromJD(jdText: string): string[] {
 
 export type Domain =
   | "sap" | "finance" | "cloud" | "ml-data" | "frontend"
-  | "backend" | "devops" | "pm" | "security" | "healthcare" | "general";
+  | "backend" | "devops" | "pm" | "tpm" | "fintech" | "ai-strategy" | "eng-mgmt"
+  | "security" | "healthcare" | "general";
 
 export function detectDomain(resumeText: string, jdText: string): Domain {
   const combined = (resumeText + " " + jdText).toLowerCase();
@@ -196,6 +197,10 @@ export function detectDomain(resumeText: string, jdText: string): Domain {
     ["frontend", /\b(react|angular|vue|frontend|front-end|html|css|tailwind|nextjs|ux design|figma)\b/g],
     ["backend",  /\b(node|express|django|spring boot|microservices|postgresql|mongodb|redis|graphql)\b/g],
     ["devops",   /\b(devops|ci\/cd|jenkins|ansible|kubernetes|docker|monitoring|observability)\b/g],
+    ["tpm",      /\b(technical program manager|technical programme manager|technical project manager|tpm|mlops|ml infrastructure|engineering operations|engops|azure reliability|cross-functional engineering|okr|engineering kpi|platform engineering|technical roadmap|engineering programme)\b/g],
+    ["ai-strategy", /\b(ai strategy|ai transformation|ai adoption|responsible ai|ai governance|llm|large language model|generative ai|gen ai|ai roadmap|build vs buy|ai vendor|foundation model|enterprise ai|ai programme|ai centre of excellence|copilot|ai-powered)\b/g],
+    ["fintech",  /\b(fintech|neobank|payments|open banking|psd2|fca|pci.dss|swift|sepa|faster payments|chaps|upi|acquiring|issuing|card scheme|core banking|payment platform|payment modernisation|digital banking|insurtech|regtech|aml|kyc|fraud detection)\b/g],
+    ["eng-mgmt", /\b(engineering manager|director of engineering|head of engineering|vp of engineering|vp engineering|staff engineer|principal engineer|engineering leadership|team lead|tech lead|hiring manager|people management|engineering org|engineering culture|team topology)\b/g],
     ["pm",       /\b(program manager|programme manager|programme director|pmo|stakeholder management|roadmap|sprint planning|scrum master|jira|safe agile|delivery manager|delivery lead|pi planning|agile transformation|it programme|it program|lead consultant|project director|portfolio manager|change manager)\b/g],
     ["security", /\b(cybersecurity|penetration testing|vulnerability|siem|cissp|cism|cisa|soc analyst|threat modeling)\b/g],
     ["healthcare",/\b(healthcare|hipaa|clinical|ehr|hospital|pharma|biotech|fda|patient data)\b/g],
@@ -266,6 +271,38 @@ export const DOMAIN_CERTS: Record<Domain, string[]> = {
     "CSM – Certified Scrum Master",
     "PRINCE2 Practitioner",
     "SAFe Agilist (SA) Certification",
+  ],
+  tpm: [
+    "PMP – Project Management Professional",
+    "SAFe Agilist (SA) Certification",
+    "AWS Certified Solutions Architect – Associate",
+    "Microsoft Azure Fundamentals (AZ-900)",
+    "Google Project Management Certificate",
+    "Certified Scrum Product Owner (CSPO)",
+  ],
+  "ai-strategy": [
+    "AWS Certified Machine Learning – Specialty",
+    "Microsoft Azure AI Engineer Associate (AI-102)",
+    "Google Professional Machine Learning Engineer",
+    "Certified AI Governance Professional (AIGP)",
+    "Stanford AI in Healthcare (or domain-equivalent)",
+    "SAFe Agilist – AI / LeanAI track",
+  ],
+  fintech: [
+    "ACAMS – Certified Anti-Money Laundering Specialist",
+    "CISI – Chartered Institute for Securities & Investment",
+    "PCI-DSS Qualified Security Assessor (QSA)",
+    "AWS Financial Services Competency",
+    "Certified FinTech Professional (CFtP)",
+    "PRINCE2 Practitioner",
+  ],
+  "eng-mgmt": [
+    "AWS Certified Solutions Architect – Professional",
+    "Certified Engineering Manager (CEM)",
+    "SAFe Lean Portfolio Management (LPM)",
+    "Google Professional Cloud Architect",
+    "PRINCE2 Practitioner",
+    "Certified ScrumMaster (CSM)",
   ],
   security: [
     "CISSP – Certified Information Systems Security Professional",

@@ -262,6 +262,108 @@ STRENGTH SCORING:
 - 85+: Strong action language, 3+ quantified outcomes, clear progression, tailored summary
 - 70-84: Good language, 1-2 metrics, reasonable structure
 - Below 70: Generic language, no metrics, unclear progression`,
+
+    tpm: `DOMAIN: Technical Programme / Project / Product Management
+SCORING RULES:
+1. Technical depth is MANDATORY — this is not a pure PM role:
+   - Can candidate read/review engineering designs, architecture docs, and system specs? = 15pts
+   - Evidence of hands-on technical background (engineering, data, cloud, ML) = 10pts
+   - No technical background = cap match score at 60% regardless of PM skills
+2. Cross-functional delivery at scale:
+   - Drove alignment across 3+ engineering teams or orgs = 12pts
+   - Managed dependencies between teams without direct authority = 10pts
+   - OKR/KPI definition and tracking with evidence = 8pts
+3. For AI/MLOps TPM roles specifically:
+   - MLOps pipeline delivery (training, inference, monitoring) = 15pts
+   - ML infrastructure programme management = 12pts
+   - AI governance, responsible AI, policy-driven automation = 10pts
+   - Cloud reliability/SRE programme context = 8pts
+4. Stakeholder influence without authority: evidence of influencing engineers and engineering leads = 10pts
+5. Tools: ADO, Jira, Confluence, OKR frameworks, RAID logs with hands-on use = 5pts (max 10)
+6. Certifications: PMP, SAFe, AWS/Azure with technical context = 5pts each (max 10)
+STRENGTH SCORING:
+- 85+: Technical background + PM delivery + quantified programme outcomes + cross-org influence evidence
+- 70-84: Good technical awareness, solid delivery record, some cross-team scope
+- 55-69: PM skills without technical depth, or technical skills without programme delivery ownership
+- Below 55: Pure PM with no technical signals, or pure IC engineer with no delivery leadership`,
+
+    fintech: `DOMAIN: Fintech / Financial Services — Director / Head / Senior Manager
+SCORING RULES:
+1. Regulatory and compliance awareness is a DIFFERENTIATOR:
+   - Named regulations with implementation experience: FCA, PSD2, PCI-DSS, Basel III, GDPR, AML = 10pts each (max 20)
+   - Audit and assurance delivery (internal, external, regulator-facing) = 10pts
+   - Risk frameworks (operational, credit, market) = 8pts
+2. Product and commercial ownership:
+   - P&L ownership with scale (£/$Xm revenue, cost base) = 15pts
+   - Product delivery end-to-end (ideation to live) = 12pts
+   - Commercial partnerships, vendor negotiation, contract ownership = 8pts
+3. Payment domain specifics (for payment roles):
+   - Named rails: SWIFT, SEPA, Faster Payments, CHAPS, UPI, VISA/MC schemes = 10pts each relevant
+   - Core banking or payment platform modernisation = 12pts
+   - Open banking / API-first architecture = 8pts
+4. Transformation delivery at fintech scale:
+   - Digital transformation with user/revenue impact = 12pts
+   - Regulatory programme delivery on deadline = 10pts
+   - Platform migration or core system replacement = 10pts
+5. Seniority signals for fintech: ExCo or Board reporting, P&L ownership, team of 10+, budget ownership = 10pts
+STRENGTH SCORING:
+- 85+: Named regulations, P&L ownership, payment domain depth, transformation outcomes, ExCo exposure
+- 70-84: Good regulatory awareness, product ownership, some commercial evidence
+- 55-69: Financial services experience but limited regulatory or product depth
+- Below 55: Generic management without fintech domain signals`,
+
+    "ai-strategy": `DOMAIN: AI Strategy / AI Transformation Leader
+SCORING RULES:
+1. Strategic framing is PRIMARY — this is not a hands-on ML engineering role:
+   - Build vs buy decisions with business rationale = 12pts
+   - AI vendor selection and evaluation (OpenAI, Anthropic, AWS Bedrock, Azure AI) = 10pts
+   - ROI framing: cost savings, productivity gains, revenue impact from AI = 15pts
+   - Board or C-suite AI strategy communication = 10pts
+2. Transformation delivery:
+   - Enterprise-wide AI adoption programme (not just a pilot) = 15pts
+   - Change management for AI tools across a workforce = 10pts
+   - AI governance framework design (responsible AI, ethics, bias, auditability) = 10pts
+3. Technical credibility (required but not the primary score driver):
+   - Understands LLMs, RAG, fine-tuning, agents conceptually = 8pts
+   - Has shipped at least one AI/ML product to production = 10pts
+   - Can translate between business and engineering teams = 8pts
+4. Domain-specific AI delivery (scores higher if matches JD):
+   - BFSI AI (fraud, credit risk, AML automation) = 10pts for BFSI roles
+   - Customer experience AI (chatbots, personalisation, CX automation) = 8pts
+   - Operational AI (process automation, predictive maintenance, quality) = 8pts
+5. Penalise if: only hands-on ML/data science without leadership evidence (-10pts)
+   or only strategy without any AI delivery evidence (-10pts)
+STRENGTH SCORING:
+- 85+: Enterprise AI programme delivered, ROI quantified, C-suite exposure, governance framework, technical credibility
+- 70-84: Good AI strategy evidence, some delivery, business impact framing
+- 55-69: AI awareness without delivery, or delivery without strategic framing
+- Below 55: Generic digital transformation without AI specifics`,
+
+    "eng-mgmt": `DOMAIN: Engineering Management — Manager / Senior Manager / Director of Engineering
+SCORING RULES:
+1. People leadership is PRIMARY — this is not an IC (individual contributor) role:
+   - Team size managed directly: 5-10 = 8pts, 10-20 = 12pts, 20+ = 15pts
+   - Hiring and org building: grew team from X to Y = 10pts
+   - Performance management, career development, attrition evidence = 8pts
+   - Created a high-performing team culture with measurable evidence = 8pts
+2. Technical credibility (mandatory floor — cap at 55% without it):
+   - Strong prior IC engineering background (software, data, infrastructure) = 10pts
+   - Can conduct technical design reviews and make architecture calls = 10pts
+   - Drives technical strategy and roadmap (not just delivery of tickets) = 12pts
+3. Delivery leadership:
+   - Shipped products or platforms at scale with named outcomes = 12pts
+   - Cross-team programme delivery with dependencies managed = 10pts
+   - Incident management, reliability ownership, SLA accountability = 8pts
+4. Strategic signals for Director-level roles:
+   - Engineering org design (team topology, platform vs product split) = 10pts
+   - Budget ownership and headcount planning = 8pts
+   - Executive stakeholder management and board-level reporting = 8pts
+5. Tools and process: SDLC ownership, ADO/Jira at org level, engineering KPIs = 5pts each (max 10)
+STRENGTH SCORING:
+- 85+: Large team led, technical depth, shipped products, org design evidence, executive exposure
+- 70-84: Good team leadership, solid technical background, delivery evidence
+- 55-69: Technical depth without leadership breadth, or leadership without technical credibility
+- Below 55: IC background only, no people management signals`,
   };
 
   return (rubrics[domain] ?? rubrics["general"]) as string;
