@@ -1,20 +1,9 @@
 /**
- * analyzer.ts — Phase 1: Two-pass Claude-powered resume analysis
+ * analyzer.ts — Phase 1 + Phase 2: Two-pass Claude-powered resume analysis
  *
- * PASS 1 — Skill Extraction (Claude)
- *   Extracts a structured skill inventory from the resume and JD separately.
- *   Claude understands context, synonyms, and implicit skills — e.g. it knows
- *   "led the S/4HANA cutover" implies HANA migration experience even without the
- *   exact keyword. It also identifies seniority signals and domain.
- *
- * PASS 2 — Intelligent Scoring (Claude)
- *   Receives the structured inventories and produces calibrated scores.
- *   Scoring is domain-aware: PM/Director resumes are scored on business impact,
- *   not keyword density. SAP resumes check GRC sub-module coverage, not generic
- *   "project management" keywords.
- *
- * FALLBACK — if ANTHROPIC_API_KEY is absent or either pass fails, the original
- *   regex-based logic runs so the app never breaks.
+ * PASS 1 — Skill Extraction (Claude): extracts structured skill inventory
+ * PASS 2 — Domain-Specific Scoring (Claude): scores with per-domain rubrics
+ * FALLBACK — regex-based logic if no API key or Claude fails
  */
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -38,7 +27,6 @@ export interface AnalysisResult {
     measurableResults: number;
     sectionsFound: number;
   };
-  // Phase 1 additions
   domain?: string;
   seniorityLevel?: "junior" | "mid" | "senior" | "executive";
   scoringRationale?: string;
@@ -62,47 +50,42 @@ export interface ScoringResult {
   scoringRationale: string;
 }
 
-// ─── Constants for fallback ───────────────────────────────────────────────────
+// ─── Constants ────────────────────────────────────────────────────────────────
 
 const ACTION_VERBS = [
-  "built", "created", "developed", "delivered", "led", "managed", "improved",
-  "increased", "reduced", "optimized", "launched", "designed", "spearheaded",
-  "orchestrated", "architected", "streamlined", "automated", "implemented",
-  "deployed", "configured", "engineered", "drove",
+  "built","created","developed","delivered","led","managed","improved",
+  "increased","reduced","optimized","launched","designed","spearheaded",
+  "orchestrated","architected","streamlined","automated","implemented",
+  "deployed","configured","engineered","drove",
 ];
 
 const SECTION_KEYWORDS = [
-  "experience", "education", "skills", "summary", "projects", "certifications",
+  "experience","education","skills","summary","projects","certifications",
 ];
 
+// ─── JD preprocessor ─────────────────────────────────────────────────────────
 
-// ─── JD preprocessor — strips structural noise before Claude sees it ──────────
-// Removes section headings ("Key Responsibilities", "Requirements"), bullet
-// numbering, and other non-skill text so Claude doesn't parse them as skills.
 function preprocessJD(jd: string): string {
+  const headings = [
+    "KEY RESPONSIBILITIES","RESPONSIBILITIES","REQUIREMENTS","QUALIFICATIONS",
+    "WHAT YOU WILL DO","WHAT WE NEED","NICE TO HAVE","PREFERRED",
+    "ABOUT THE ROLE","THE ROLE","JOB DESCRIPTION","OVERVIEW",
+    "WHO YOU ARE","BENEFITS","ABOUT US","WHAT YOU BRING","YOUR PROFILE",
+  ];
   return jd
     .split("\n")
     .map(line => line.trim())
     .filter(line => {
       if (!line) return false;
       const upper = line.toUpperCase();
-      // Drop pure section headings (short lines, no sentence structure)
-      const headings = [
-        "KEY RESPONSIBILITIES", "RESPONSIBILITIES", "REQUIREMENTS",
-        "QUALIFICATIONS", "WHAT YOU WILL DO", "WHAT WE NEED",
-        "NICE TO HAVE", "PREFERRED", "ABOUT THE ROLE", "THE ROLE",
-        "JOB DESCRIPTION", "OVERVIEW", "WHO YOU ARE", "BENEFITS",
-        "ABOUT US", "WHAT YOU BRING", "YOUR PROFILE",
-      ];
       if (headings.some(h => upper.startsWith(h)) && line.length < 60) return false;
-      // Drop lines that are just a number or bullet marker
-      if (/^[\d]+\.?$/.test(line)) return false;
+      if (/^\d+\.?$/.test(line)) return false;
       return true;
     })
     .join("\n");
 }
 
-// ─── Pass 1: Extract structured skill inventory via Claude ────────────────────
+// ─── Pass 1: Skill extraction ─────────────────────────────────────────────────
 
 async function extractSkillInventory(
   text: string,
@@ -111,44 +94,35 @@ async function extractSkillInventory(
 ): Promise<SkillInventory> {
   const roleLabel = role === "resume" ? "resume" : "job description";
 
-  const systemPrompt = `You are an expert technical recruiter and resume analyst with deep knowledge across:
-- SAP/ERP ecosystems (GRC, S/4HANA, Fiori, ABAP, Security, ARA, ARM, BRM, EAM, MSMP)
-- Programme/Project Management (PMP, SAFe, PRINCE2, delivery management, PMO)
-- Cloud platforms (AWS, Azure, GCP) and DevOps
-- Data Engineering, ML/AI
-- BFSI, Payments, Insurance domain knowledge
-- Cybersecurity and IAM
-
-Your job is to extract a precise, structured skill inventory from the text provided.
+  const systemPrompt = `You are an expert technical recruiter with deep knowledge across SAP/ERP, Programme Management, Cloud, Data Engineering, BFSI, and Cybersecurity.
+Extract a precise structured skill inventory from the text provided.
 Return ONLY valid JSON — no markdown, no explanation, no code blocks.`;
 
   const userPrompt = `Extract a complete skill inventory from this ${roleLabel}.
 
 RULES:
-0. IGNORE section headings, structural phrases, and meta-text. Examples of what to IGNORE:
-   - "Key Responsibilities", "Requirements", "Qualifications", "Act as the..."
-   - Sentences starting with verbs like "Lead", "Conduct", "Drive", "Manage" — these are
-     responsibilities, not skills. Extract only the skill/technology embedded within them.
-   - Degree requirements like "Bachelor's degree in Computer Science" → extract "Computer Science" only
-   - Experience requirements like "10+ years of experience as a Security Consultant" → NOT a skill
-1. "explicit" = skills, tools, technologies, frameworks directly named (e.g. "SAP GRC", "Python", "Ariba Network")
-2. "implied" = skills strongly evidenced by context but not stated as a skill keyword
-   Example: "Led S/4HANA cutover for 2,400 users" → implies: S/4HANA migration, change management, cutover planning
-   Example: "Managed £8M programme budget" → implies: financial governance, budget management, executive reporting
-3. Normalise synonyms to their canonical form:
-   - "Programme Manager" and "Program Manager" → "Programme Management"
-   - "SAP GRC Access Control" / "GRC" / "Access Control 12.0" → "SAP GRC"
-   - "SoD" / "Segregation of Duties" → "SoD Analysis"
-4. For domain detection, choose the SINGLE best fit:
-   sap | pm | cloud | data | devops | security | finance | healthcare | general
-5. For seniority, look for:
-   - executive: Director, VP, Programme Director, Head of, C-level, P&L ownership, large budget
+0. IGNORE section headings and structural phrases. Examples to IGNORE:
+   - "Key Responsibilities", "Requirements", "Act as the..."
+   - Sentences starting with action verbs like "Lead", "Conduct", "Drive" — extract only the skill embedded within them
+   - Degree requirements: "Bachelor's in Computer Science" -> extract "Computer Science" only
+   - Experience requirements: "10+ years as Security Consultant" -> NOT a skill
+1. "explicit" = skills/tools/technologies directly named (e.g. "SAP GRC", "Python", "Ariba Network")
+2. "implied" = skills strongly evidenced by context but not stated as a keyword
+   Example: "Led S/4HANA cutover for 2,400 users" -> implies: S/4HANA migration, change management, cutover planning
+   Example: "Managed £8M programme budget" -> implies: financial governance, budget management, executive reporting
+3. Normalise synonyms to canonical form:
+   - "Programme Manager" / "Program Manager" -> "Programme Management"
+   - "SAP GRC Access Control" / "GRC" / "Access Control 12.0" -> "SAP GRC"
+   - "SoD" / "Segregation of Duties" -> "SoD Analysis"
+4. Domain: choose ONE: sap | pm | cloud | data | devops | security | finance | healthcare | general
+5. Seniority:
+   - executive: Director, VP, Programme Director, Head of, C-level, large budget ownership
    - senior: Lead, Senior, Principal, 8+ years, team of 5+, architecture ownership
    - mid: 3-7 years, delivery ownership, some team lead
    - junior: 0-2 years, contributor, associate
-6. achievements = measurable outcomes only (must have a number, %, currency amount, or concrete scale)
+6. achievements = measurable outcomes only (must have number, %, currency, or concrete scale)
 
-Return this exact JSON structure:
+Return ONLY this JSON:
 {
   "explicit": ["skill1", "skill2"],
   "implied": ["skill1", "skill2"],
@@ -158,7 +132,7 @@ Return this exact JSON structure:
   "achievements": ["achievement1", "achievement2"]
 }
 
-Text to analyse:
+Text:
 ---
 ${text.slice(0, 3000)}
 ---`;
@@ -175,7 +149,125 @@ ${text.slice(0, 3000)}
   return JSON.parse(clean) as SkillInventory;
 }
 
-// ─── Pass 2: Domain-aware scoring via Claude ──────────────────────────────────
+// ─── Phase 2: Domain-specific scoring rubrics ─────────────────────────────────
+
+function getDomainRubric(domain: string, seniorityLevel: string): string {
+  const isExecutive = seniorityLevel === "executive" || seniorityLevel === "senior";
+
+  const rubrics: Record<string, string> = {
+    sap: `DOMAIN: SAP / ERP
+SCORING RULES:
+1. Sub-module coverage is CRITICAL — score each separately:
+   - ARA (Access Risk Analysis): 15pts if hands-on evidence present
+   - ARM (Access Request Management): 15pts if present
+   - BRM (Business Role Management): 10pts if present
+   - EAM (Emergency Access Management): 10pts if present
+   - Generic "SAP GRC" without sub-module detail = 5pts only
+2. SAP Ariba roles: Ariba modules (Sourcing, Buying, SLP, Network) are entirely separate from SAP GRC. Cross-credit = 0.
+3. SoD ruleset design and remediation with specifics = 10pts
+4. Integration security (S/4HANA to Ariba CIG, API-based) = 10pts if evidenced
+5. Deduct 10pts if candidate claims SAP experience but no version or module specifics
+6. Certifications: SAP Certified AC 12.0, CISA, ISO 27001 = 5pts bonus each (max 10)
+STRENGTH SCORING:
+- 85+: Deep sub-module coverage, version-specific experience, named clients, project scale
+- 70-84: Good module breadth, some specifics, clear progression
+- Below 70: Generic SAP claims, no sub-module depth`,
+
+    pm: isExecutive
+      ? `DOMAIN: Programme / Project Management — EXECUTIVE TIER
+SCORING RULES:
+1. Business impact language is the PRIMARY signal. Score on:
+   - Budget scale: £/$1M+ programmes = strong signal (10pts)
+   - Stakeholder scope: 10+ stakeholders or cross-org programmes (10pts)
+   - Delivery outcomes: on-time delivery, cost savings, improvement % (15pts)
+   - Transformation programmes: digital, cloud, ERP, platform migrations (10pts)
+2. Methodology depth: SAFe, PI Planning, PRINCE2, MSP = 5pts each (max 15)
+3. Client-facing consulting: named clients, proposals, SOW ownership = 10pts
+4. Domain knowledge matching JD industry (BFSI, Payments, SAP) = 5pts
+5. DO NOT score on keyword density. A PM who "led £12M BFSI transformation" outscores one who lists "Agile, Scrum, Kanban, Jira" without delivery evidence.
+6. Penalise -10pts if no quantified outcomes present at all
+STRENGTH SCORING:
+- 85+: Quantified outcomes, executive stakeholder evidence, named clients and programmes
+- 70-84: Good delivery evidence, some metrics, clear ownership language
+- Below 70: Generic PM language, limited metrics, unclear delivery scope`
+      : `DOMAIN: Programme / Project Management
+SCORING RULES:
+1. Methodology evidence: Agile, Scrum, SAFe, PRINCE2 with project context (15pts)
+2. Delivery ownership: end-to-end delivery, not just contribution (15pts)
+3. Stakeholder management: named stakeholders, steering committees (10pts)
+4. Risk and issue management with specifics (10pts)
+5. Tools: Jira, Confluence, MS Project, ADO with hands-on use (5pts each, max 10)
+STRENGTH SCORING:
+- 85+: Quantified delivery outcomes, clear ownership, methodology depth
+- 70-84: Good evidence, some metrics, reasonable structure
+- Below 70: Generic language, no metrics, unclear scope`,
+
+    cloud: `DOMAIN: Cloud / DevOps / Infrastructure
+SCORING RULES:
+1. Service-level specificity — score by tier:
+   - Named services (Lambda, EKS, CloudFront, Pub/Sub) = full credit
+   - Platform level (AWS, Azure, GCP) without named services = 40% credit
+   - Generic "cloud experience" = 10% credit only
+2. Architecture ownership: designed vs implemented vs used = full / half / quarter credit
+3. IaC tools (Terraform, Pulumi, CDK, Ansible) with scale evidence = 10pts
+4. Observability (Datadog, Prometheus, Grafana, CloudWatch) = 8pts
+5. Cloud security (IAM, VPC design, WAF, KMS) = 10pts for security roles
+6. Production scale: requests/day, SLA %, team size = strong signal
+7. Certifications: AWS SA Pro, CKA, GCP Pro = 10pts each (max 20)
+STRENGTH SCORING:
+- 85+: Named services, architecture ownership, production scale, IaC, observability
+- 70-84: Good service breadth, some ownership, production context
+- Below 70: Platform-level claims only, no service depth`,
+
+    data: `DOMAIN: Data Engineering / Analytics / ML
+SCORING RULES:
+1. Production deployment evidence is CRITICAL — "built a model" does not equal "deployed to production"
+2. Pipeline ownership: ingestion, transformation, serving, monitoring = 10pts per stage owned
+3. Scale evidence: data volume (TB/PB), latency (ms), throughput (events/sec) = strong signal
+4. Tool depth:
+   - Core (Spark, Airflow, dbt, Kafka, Flink) = 10pts each with project context
+   - Warehouse (Snowflake, BigQuery, Redshift, Databricks) = 8pts each
+   - Orchestration and monitoring (Prefect, Dagster, Great Expectations) = 6pts each
+5. ML roles: distinguish model building from MLOps — deployment, monitoring, retraining pipelines
+6. Certifications: Databricks, GCP DE, AWS DE, dbt = 5pts each
+STRENGTH SCORING:
+- 85+: Production pipelines, scale metrics, full stack ownership, named toolchain
+- 70-84: Good tool breadth, some production context, pipeline ownership
+- Below 70: Notebook or academic work, limited production evidence`,
+
+    security: `DOMAIN: Cybersecurity / IAM / GRC
+SCORING RULES:
+1. Specialisation match: IAM, AppSec, SOC, and GRC are distinct — cross-domain = partial credit only
+2. Framework coverage: NIST, ISO 27001, SOC2, CIS Controls = 8pts each if implemented (not just aware)
+3. Tool specificity: Splunk, CrowdStrike, Qualys, BeyondTrust, SailPoint, Okta = 10pts each
+4. Incident response: hands-on IR (not just planning) = 12pts
+5. Certifications are heavily weighted:
+   - CISSP, CISM = 15pts each
+   - CEH, OSCP, GCIH = 10pts each
+   - CompTIA Security+, CySA+ = 5pts each
+6. Cloud security (AWS Security, Azure Defender, GCP SCC) = 10pts if role-relevant
+STRENGTH SCORING:
+- 85+: Active certifications, tool depth, named incidents and programmes, compliance delivery
+- 70-84: Good framework knowledge, some tool hands-on, clear specialisation
+- Below 70: Generic security awareness, no tool depth, no cert specifics`,
+
+    general: `DOMAIN: General / Cross-functional
+SCORING RULES:
+1. Skill coverage: match explicit JD requirements first, then implied (60% / 40% weight)
+2. Experience level matching JD seniority = 15pts
+3. Domain relevance: candidate industry matching JD industry = 10pts
+4. Quantified achievements: 3 or more = 15pts, 1-2 = 8pts, none = 0pts
+5. Progression evidence: promotions, scope growth, increasing responsibility = 10pts
+STRENGTH SCORING:
+- 85+: Strong action language, 3+ quantified outcomes, clear progression, tailored summary
+- 70-84: Good language, 1-2 metrics, reasonable structure
+- Below 70: Generic language, no metrics, unclear progression`,
+  };
+
+  return (rubrics[domain] ?? rubrics["general"]) as string;
+}
+
+// ─── Pass 2: Domain-aware scoring ────────────────────────────────────────────
 
 async function scoreCandidateFit(
   resumeInventory: SkillInventory,
@@ -183,48 +275,48 @@ async function scoreCandidateFit(
   resumeText: string,
   client: Anthropic
 ): Promise<ScoringResult> {
-  const systemPrompt = `You are a senior technical recruiter. You score resume-to-job-description fit.
+  const scoringDomain = jdInventory.domain !== "general"
+    ? jdInventory.domain
+    : resumeInventory.domain;
+  const domainRubric = getDomainRubric(scoringDomain, resumeInventory.seniorityLevel);
 
-SCORING PHILOSOPHY — different domains need different scoring logic:
-- SAP/GRC: Weight sub-module coverage heavily (ARA, ARM, BRM, EAM each count separately). Generic "SAP experience" without sub-module detail = partial credit only.
-- Programme/Project Management (executive): Score on business impact language, stakeholder scope, budget scale, and delivery outcomes — NOT keyword density.
-- Cloud/DevOps: Score on service-level specificity (e.g. Lambda vs "AWS" vs "cloud") and architecture ownership.
-- Data/ML: Score on toolchain depth and production deployment experience, not just familiarity.
-- General: Balanced keyword + quality scoring.
+  const systemPrompt = `You are a senior technical recruiter and domain expert. Score resume-to-job-description fit using the domain rubric below.
 
-CALIBRATION GUIDE (be accurate, not generous):
-- 85-100: Near-perfect fit. Candidate clearly meets almost all requirements with strong evidence.
+${domainRubric}
+
+UNIVERSAL CALIBRATION (apply after domain scoring):
+- 85-100: Near-perfect fit. Strong evidence across almost all requirements.
 - 70-84: Good fit. Meets most requirements, minor gaps, strong candidacy.
-- 55-69: Moderate fit. Meets core requirements but meaningful gaps exist.
+- 55-69: Moderate fit. Core requirements met but meaningful gaps exist.
 - 40-54: Partial fit. Some alignment but significant gaps.
-- Below 40: Weak fit. Fundamental mismatch between profile and role.
+- Below 40: Weak fit. Fundamental mismatch.
 
-strengthScore = quality of the resume itself, independent of the JD:
-- 85+: Executive-level writing, strong impact language, quantified achievements, clear progression
+STRENGTH SCORE = resume quality independent of JD:
+- 85+: Executive-level writing, quantified outcomes, clear progression, specific client/programme context
 - 70-84: Good writing, some metrics, action verbs, well structured
 - 55-69: Average, some action verbs, limited metrics
-- Below 55: Weak language, no metrics, passive writing
+- Below 55: Weak language, passive voice, no metrics
 
-Return ONLY valid JSON, no explanation outside the JSON.`;
+Return ONLY valid JSON.`;
 
-  const userPrompt = `Score this candidate's fit for the role.
+  const userPrompt = `Score this candidate using the domain rubric provided.
 
-JD Skill Requirements:
+ROLE REQUIREMENTS:
 - Domain: ${jdInventory.domain}
+- Seniority expected: ${jdInventory.seniorityLevel}
 - Required skills (explicit): ${jdInventory.explicit.slice(0, 20).join(", ")}
 - Required skills (implied): ${jdInventory.implied.slice(0, 10).join(", ")}
-- Seniority expected: ${jdInventory.seniorityLevel}
 
-Candidate Profile:
+CANDIDATE PROFILE:
 - Domain: ${resumeInventory.domain}
+- Seniority: ${resumeInventory.seniorityLevel}
+- Seniority evidence: ${resumeInventory.seniorityEvidence.slice(0, 4).join("; ")}
 - Skills (explicit): ${resumeInventory.explicit.slice(0, 25).join(", ")}
 - Skills (implied): ${resumeInventory.implied.slice(0, 15).join(", ")}
-- Seniority level: ${resumeInventory.seniorityLevel}
-- Seniority evidence: ${resumeInventory.seniorityEvidence.slice(0, 3).join("; ")}
-- Key achievements: ${resumeInventory.achievements.slice(0, 5).join("; ")}
+- Quantified achievements: ${resumeInventory.achievements.slice(0, 6).join("; ")}
 
-Resume quality signals (from text):
-${resumeText.slice(0, 500)}
+Resume opening (quality signal):
+${resumeText.slice(0, 600)}
 
 Return this exact JSON:
 {
@@ -233,23 +325,22 @@ Return this exact JSON:
   "matchedSkills": ["skill1", "skill2"],
   "missingSkills": ["skill1", "skill2"],
   "suggestions": [
-    "Specific, actionable suggestion 1",
-    "Specific, actionable suggestion 2",
-    "Specific, actionable suggestion 3"
+    "Specific suggestion referencing actual gap in THIS resume vs THIS JD",
+    "Specific suggestion 2",
+    "Specific suggestion 3"
   ],
-  "scoringRationale": "One paragraph explaining the score reasoning, domain-specific"
+  "scoringRationale": "2-3 sentences explaining match score using domain-specific reasoning"
 }
 
-Rules for suggestions:
-- Maximum 5 suggestions, each must be specific to THIS JD and resume — never generic
-- Reference actual missing skills or specific gaps found in this analysis
-- For executive resumes: focus on impact language and business outcome framing
-- For technical resumes: focus on specific missing tools/technologies
-- Never say "add action verbs" or "quantify achievements" generically — name the specific bullets to improve`;
+SUGGESTION RULES:
+- 3 to 5 suggestions, each referencing a specific skill or section from this actual resume
+- For executive/senior: frame as impact language improvements, not keyword additions
+- For technical roles: name the exact missing tool and why it matters for this role
+- Never write generic advice like "add action verbs" or "quantify your achievements"`;
 
   const message = await client.messages.create({
     model: "claude-sonnet-4-5",
-    max_tokens: 1500,
+    max_tokens: 1800,
     system: systemPrompt,
     messages: [{ role: "user", content: userPrompt }],
   });
@@ -259,7 +350,7 @@ Rules for suggestions:
   return JSON.parse(clean) as ScoringResult;
 }
 
-// ─── Resume stats (calculated locally, used in UI) ────────────────────────────
+// ─── Resume stats ─────────────────────────────────────────────────────────────
 
 function computeStats(resume: string) {
   const wordCount = resume.trim().split(/\s+/).filter(Boolean).length;
@@ -275,16 +366,16 @@ function computeStats(resume: string) {
   return { wordCount, actionVerbs, measurableResults, sectionsFound };
 }
 
-// ─── Fallback: original regex-based analysis (no API key or on error) ─────────
+// ─── Fallback: regex-based analysis ──────────────────────────────────────────
 
 const BASE_SKILLS = [
-  "JavaScript", "TypeScript", "React", "Node.js", "Python", "Java", "SQL",
-  "AWS", "Azure", "Docker", "Kubernetes", "Git", "REST API", "MongoDB",
-  "PostgreSQL", "Machine Learning", "Agile", "Leadership", "Project Management",
-  "SAP", "GRC", "SoD", "ARA", "ARM", "BRM", "EAM", "MSMP", "PFCG", "SU24",
-  "S/4HANA", "Fiori", "HANA", "ABAP", "Ariba", "SAP Security",
-  "IAM", "SSO", "SOX", "Cybersecurity",
-  "Scrum", "Kanban", "Jira", "Stakeholder Management", "Programme Management",
+  "JavaScript","TypeScript","React","Node.js","Python","Java","SQL",
+  "AWS","Azure","Docker","Kubernetes","Git","REST API","MongoDB",
+  "PostgreSQL","Machine Learning","Agile","Leadership","Project Management",
+  "SAP","GRC","SoD","ARA","ARM","BRM","EAM","MSMP","PFCG","SU24",
+  "S/4HANA","Fiori","HANA","ABAP","Ariba","SAP Security",
+  "IAM","SSO","SOX","Cybersecurity",
+  "Scrum","Kanban","Jira","Stakeholder Management","Programme Management",
 ];
 
 function fallbackAnalyze(resume: string, jobDescription: string): AnalysisResult {
@@ -304,25 +395,21 @@ function fallbackAnalyze(resume: string, jobDescription: string): AnalysisResult
   const stats = computeStats(resume);
   const matchRatio = allRequested.length > 0 ? matchedSkills.length / allRequested.length : 0;
   const skillScore = allRequested.length > 0 ? matchRatio * 75 : 45;
-  const qualityScore = Math.min(
-    25,
+  const qualityScore = Math.min(25,
     stats.actionVerbs * 2 + stats.measurableResults * 3 + stats.sectionsFound * 2
   );
   const matchScore = Math.round(Math.min(100, skillScore + qualityScore));
-  const strengthScore = Math.round(
-    Math.min(100, 25 + stats.sectionsFound * 8 + stats.actionVerbs * 3 +
-      stats.measurableResults * 5 + Math.min(10, stats.wordCount / 60))
-  );
+  const strengthScore = Math.round(Math.min(100,
+    25 + stats.sectionsFound * 8 + stats.actionVerbs * 3 +
+    stats.measurableResults * 5 + Math.min(10, stats.wordCount / 60)
+  ));
 
   const suggestions: string[] = [];
   if (missingSkills.length > 0) {
-    suggestions.push(`Add evidence of these JD-required skills where truthful: ${missingSkills.slice(0, 4).join(", ")}.`);
+    suggestions.push(`Add evidence of these required skills where truthful: ${missingSkills.slice(0, 4).join(", ")}.`);
   }
   if (stats.measurableResults < 3) {
     suggestions.push("Quantify at least three achievements with percentages, revenue impact, or scale.");
-  }
-  if (stats.actionVerbs < 5) {
-    suggestions.push("Start more bullets with strong action verbs: Delivered, Spearheaded, Orchestrated, Configured.");
   }
   if (!suggestions.length) {
     suggestions.push("Strong foundation. Tailor the opening summary to this specific role.");
@@ -340,7 +427,7 @@ export async function analyzeResume(
   const stats = computeStats(resume);
 
   if (!process.env.ANTHROPIC_API_KEY) {
-    console.warn("[analyzer] No ANTHROPIC_API_KEY — using fallback regex analysis");
+    console.warn("[analyzer] No ANTHROPIC_API_KEY — using fallback");
     return fallbackAnalyze(resume, jobDescription);
   }
 
@@ -356,7 +443,7 @@ export async function analyzeResume(
     console.log(`[analyzer] Resume: domain=${resumeInventory.domain}, seniority=${resumeInventory.seniorityLevel}`);
     console.log(`[analyzer] JD: domain=${jdInventory.domain}`);
 
-    console.log("[analyzer] Pass 2: domain-aware scoring...");
+    console.log("[analyzer] Pass 2: domain-specific scoring...");
     const scoring = await scoreCandidateFit(resumeInventory, jdInventory, resume, client);
     console.log(`[analyzer] Scores — match=${scoring.matchScore}, strength=${scoring.strengthScore}`);
 
@@ -372,12 +459,12 @@ export async function analyzeResume(
       scoringRationale: scoring.scoringRationale,
     };
   } catch (err) {
-    console.error("[analyzer] Claude passes failed, falling back to regex:", err);
+    console.error("[analyzer] Claude passes failed, falling back:", err);
     return fallbackAnalyze(resume, jobDescription);
   }
 }
 
-// ─── Sync fallback export (used by v1 /api/analyze endpoint and tests) ────────
+// ─── Sync fallback export (v1 endpoint and PDF download) ─────────────────────
 export function analyzeResumeSync(resume: string, jobDescription: string): AnalysisResult {
   return fallbackAnalyze(resume, jobDescription);
 }
