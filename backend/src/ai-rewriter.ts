@@ -89,8 +89,8 @@ function classifyHeading(line: string): SectionType | null {
   // Strip trailing punctuation to normalise "SKILLS:" → "SKILLS"
   const clean = raw.replace(/[\s:;|\-–—]+$/, "").trim();
   const upper = clean.toUpperCase();
-  // Count words — more than 10 = likely a sentence, not a heading
-  if (clean.split(/\s+/).length > 10) return null;
+  // Count words — more than 6 = likely a sentence, not a heading
+  if (clean.split(/\s+/).length > 6) return null;
 
   // Priority 1: known keyword match
   for (const { keywords, type } of SECTION_KEYWORDS) {
@@ -224,7 +224,29 @@ function extractSections(resumeText: string): ResumeSection[] {
   }
   flush();
 
-  return sections;
+  // Remove sections with no content — misclassified bullet points
+  const nonEmpty = sections.filter(s =>
+    s.type === "header" ||
+    s.originalContent.trim().length > 0 ||
+    s.bullets.length > 0
+  );
+
+  // Deduplicate sections — PDF extraction sometimes doubles content
+  // Keep first occurrence of each section type
+  const seen = new Set<string>();
+  const deduped = sections.filter(s => {
+    const key = `${s.type}::${s.originalTitle.slice(0, 20)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  // Final filter: skip empty sections that slipped through
+  return deduped.filter(s =>
+    s.type === "header" ||
+    s.originalContent.trim().length > 0 ||
+    s.bullets.length > 0
+  );
 }
 
 // ─── Rule-based content rewriter ─────────────────────────────────────────────
@@ -289,7 +311,8 @@ function rewriteSectionContent(
     const existing = section.bullets.length
       ? section.bullets
       : section.originalContent.split(/[,|•\n;]+/).map(s => s.trim()).filter(Boolean);
-    const merged = [...new Set([...existing, ...analysis.matchedSkills, ...analysis.missingSkills.slice(0, 3)])].filter(Boolean);
+    // Only add genuinely matched skills — never inject missing skills into the CV
+    const merged = [...new Set([...existing, ...analysis.matchedSkills])].filter(Boolean);
     return { ...section, rewrittenContent: merged.join(" • "), rewrittenBullets: merged };
   }
 
@@ -377,18 +400,108 @@ export async function rewriteResume(
     bullets: s.bullets.slice(0, 10),
   }));
 
-  const prompt = `You are an expert resume editor. Rewrite each section below to better align with the job description.
+  // ── Phase 3: Executive Resume Mode ──────────────────────────────────────────
+  // Detect executive tier and inject domain-specific rewriting intelligence.
+  // Executive PMs get impact language transformation.
+  // SAP/technical profiles get sub-module and specificity improvements.
+  // All profiles get seniority-appropriate verb and structure guidance.
+
+  const isExecutive = analysis.seniorityLevel === "executive" || analysis.seniorityLevel === "senior";
+  const domain = analysis.domain ?? "general";
+
+  const executiveGuidance = isExecutive ? `
+EXECUTIVE RESUME MODE — ACTIVE:
+This is a senior/executive profile. Apply these additional rules:
+
+IMPACT LANGUAGE TRANSFORMATION:
+- Convert vague responsibility bullets into outcome statements
+  BEFORE: "Led a team of consultants on SAP implementation"
+  AFTER: "Spearheaded 12-consultant SAP S/4HANA delivery for 2,400-user organisation, completing 6 weeks ahead of schedule"
+- Every Experience bullet must answer: What was the scale? What was the outcome? Who benefited?
+- Surface business impact language: cost savings, revenue protected, efficiency gains, risk reduced, compliance achieved
+- Replace "responsible for" with ownership verbs: Owned, Drove, Delivered, Architected, Governed
+
+SENIORITY SIGNALS TO STRENGTHEN:
+- Budget scale: if mentioned, make it prominent ("£8M programme" not buried mid-sentence)
+- Stakeholder scope: "C-suite advisory", "Board reporting", "cross-org alignment" where evidenced
+- Team scale: "led 45-person programme team" not "managed team members"
+- Transformation language: "end-to-end digital transformation" not "project delivery"
+
+EXECUTIVE SUMMARY REWRITE:
+- Open with seniority + domain + years: "Senior Programme Director with 16+ years..."
+- Second sentence: biggest career achievement with scale
+- Third sentence: what value you bring to THIS specific role
+- Never start with "I" or "Experienced professional"` : "";
+
+  const domainGuidance: Record<string, string> = {
+    sap: `
+SAP DOMAIN RULES:
+- Surface sub-module specifics: ARA, ARM, BRM, EAM, MSMP, PFCG, SU24 — name them explicitly
+- Replace "SAP experience" with specific versions: "SAP GRC Access Control 12.0", "S/4HANA 2021"
+- SoD language: "designed and maintained SoD ruleset across procure-to-pay processes"
+- Client context: "for [FTSE 100 client]" or "for [X,000]-user enterprise" adds weight
+- Certifications to surface if present: SAP Certified AC, CISA, ISO 27001`,
+
+    pm: `
+PROGRAMME MANAGEMENT DOMAIN RULES:
+- Lead every bullet with delivery outcome, not activity: "Delivered" not "Responsible for delivering"
+- Budget language: always show scale — "£12M" not "large budget", "$40M portfolio" not "multi-million"
+- Stakeholder language: name the level — "ExCo", "C-suite", "Board", "Steering Committee"
+- Methodology signals: SAFe PI Planning, PRINCE2, MSP — name the methodology with context
+- Transformation language: "end-to-end digital transformation", "greenfield platform delivery"
+- For consulting roles: surface client industry, team size, delivery timeline`,
+
+    tpm: `
+TECHNICAL PROGRAMME MANAGER DOMAIN RULES:
+- Lead with technical context then programme outcome: "Architected cross-team dependency framework for 10 Scrum teams..."
+- Surface technical decisions made: architecture reviews, build vs buy, vendor selection
+- Engineering influence language: "aligned 6 engineering leads", "unblocked 3 parallel workstreams"
+- OKR/KPI language: "defined success metrics", "tracked OKRs across 4 product teams"
+- MLOps context if present: pipeline delivery, model governance, infrastructure programme
+- Balance technical credibility with delivery outcomes in every bullet`,
+
+    "ai-strategy": `
+AI STRATEGY DOMAIN RULES:
+- Lead with business impact of AI: "Reduced FTE cost by 30% through AI automation of..."
+- ROI language: quantify the AI investment and return wherever possible
+- Governance language: "responsible AI framework", "bias detection", "model auditability"
+- Strategic framing: "enterprise-wide AI adoption", "AI centre of excellence", "build vs buy evaluation"
+- Vendor/platform specifics: Claude, GPT-4, Azure OpenAI, AWS Bedrock — name them
+- Change management language: "drove adoption across 500-person organisation"`,
+
+    fintech: `
+FINTECH DOMAIN RULES:
+- Regulatory language: name the regulation and the delivery — "PSD2 compliance programme delivered on time"
+- Payment rail specifics: SWIFT, SEPA, Faster Payments, open banking APIs — name them
+- Risk language: "reduced operational risk by X%", "zero regulatory findings in audit"
+- Commercial language: P&L ownership, revenue impact, cost reduction — show scale
+- Platform language: "core banking modernisation", "real-time payment platform"`,
+
+    "eng-mgmt": `
+ENGINEERING MANAGEMENT DOMAIN RULES:
+- People leadership first: "Scaled engineering team from 8 to 24 across 3 product squads"
+- Technical decisions: architecture choices, platform decisions, build vs buy
+- Delivery at scale: shipped products with user/revenue metrics
+- Culture signals: hiring bar raised, attrition reduced, team health metrics
+- Org design: team topology, squad model, platform vs product split`,
+  };
+
+  const activeDomainGuidance = domainGuidance[domain] ?? "";
+
+  const prompt = `You are an expert resume editor specialising in senior and executive profiles. Rewrite each section to better align with the job description.
 
 STRICT RULES — FOLLOW EXACTLY:
 1. Preserve EXACT section titles and order.
 2. Keep ALL facts: names, company names, dates, metrics, technologies. Do NOT alter or invent any.
-3. Replace weak verbs with power verbs: Spearheaded, Orchestrated, Delivered, Drove, Configured, Implemented.
+3. Replace weak verbs with power verbs: Spearheaded, Orchestrated, Delivered, Drove, Governed, Architected, Owned.
 4. Where natural and truthful, incorporate these matched skills from the JD: ${analysis.matchedSkills.slice(0, 6).join(", ")}.
 5. Do NOT invent metrics, percentages, or outcomes that are not in the original text.
-6. Do NOT append filler phrases like "driving measurable improvement in X" or "achieving significant results".
-7. If a bullet has no quantifiable metric in the original, leave it without adding one.
+6. Do NOT append filler phrases like "driving measurable improvement" or "achieving significant results".
+7. If a bullet has no quantifiable metric in the original, improve the language but do not add invented numbers.
 8. Only rewrite language — never add new facts, responsibilities, or tools not present in the original.
 9. Return ONLY valid JSON array — no markdown, no code blocks, no explanation.
+${executiveGuidance}
+${activeDomainGuidance}
 
 Job Description (excerpt):
 ${jobDescription.slice(0, 800)}
@@ -401,8 +514,10 @@ Return exactly ${rewritable.length} objects in a JSON array:
 rewrittenBullets = individual bullet strings (no bullet character) for experience/skills/projects/other sections, else []`;
 
   try {
+    // Executive/senior profiles use Sonnet for better impact language quality
+    const rewriteModel = isExecutive ? "claude-sonnet-4-5" : "claude-haiku-4-5";
     const message = await client.messages.create({
-      model: "claude-haiku-4-5",
+      model: rewriteModel,
       max_tokens: 4096,
       messages: [{ role: "user", content: prompt }],
     });
