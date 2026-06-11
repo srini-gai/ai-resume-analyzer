@@ -118,7 +118,7 @@ function MockupCard() {
 
       {/* Badge */}
       <div className="absolute -bottom-3 -right-3 rounded-xl border border-indigo-500/30 bg-[#07091a] px-3 py-1.5 text-xs font-bold text-indigo-400 shadow-lg">
-        ✦ Powered by Claude AI
+        ✦ Domain-Aware AI
       </div>
     </motion.div>
   );
@@ -311,18 +311,18 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
           <div>
             <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.55 }}>
               <div className="mb-5 inline-flex items-center gap-2 rounded-full border border-indigo-500/30 bg-indigo-500/10 px-4 py-1.5 text-xs font-bold uppercase tracking-widest text-indigo-400">
-                <Sparkles size={12} /> ✦ Powered by Claude AI
+                <Sparkles size={12} /> ✦ AI Career Intelligence
               </div>
 
               <h1 className="mb-5 text-[3.25rem] font-black leading-[1.05] tracking-tight sm:text-6xl">
-                Land your dream job{" "}
+                From Resume To Interview —{" "}
                 <span className="bg-gradient-to-r from-indigo-400 via-violet-400 to-purple-400 bg-clip-text text-transparent">
-                  faster.
+                  One AI Career Platform.
                 </span>
               </h1>
 
               <p className="mb-8 max-w-lg text-lg leading-relaxed text-slate-400">
-                AI-powered resume analysis, personalised cover letters, and interview prep — all in one platform.
+                Rewrites your resume. Writes your cover letter. Coaches your interview. All from one upload.
               </p>
 
               <div className="mb-6 flex flex-wrap gap-3">
@@ -337,7 +337,7 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
 
               {/* Trust badges */}
               <div className="flex flex-wrap gap-3">
-                {["🔒 Invite Only", "⚡ Powered by Claude AI", "🎯 ATS Optimized"].map(badge => (
+                {["🔒 Invite Only", "🎯 ATS Optimized", "✦ Executive Resume Mode"].map(badge => (
                   <span key={badge} className="rounded-full border border-slate-700/60 bg-slate-800/50 px-3 py-1 text-xs font-medium text-slate-400">
                     {badge}
                   </span>
@@ -360,8 +360,8 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
       </section>
 
       {/* ── Features ─────────────────────────────────────────────────────── */}
-      <section id="features" className="relative mx-auto max-w-6xl px-6 py-24 sm:px-10">
-        <FadeIn className="mb-12 text-center">
+      <section id="features" className="relative mx-auto max-w-6xl px-6 py-14 sm:px-10">
+        <FadeIn className="mb-8 text-center">
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-indigo-400">Features</p>
           <h2 className="text-3xl font-black sm:text-4xl">Everything you need to get hired</h2>
           <p className="mx-auto mt-3 max-w-xl text-sm text-slate-400">One platform for the entire job-search workflow.</p>
@@ -383,8 +383,8 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
       </section>
 
       {/* ── How it works ─────────────────────────────────────────────────── */}
-      <section id="how-it-works" className="relative mx-auto max-w-5xl px-6 py-24 sm:px-10">
-        <FadeIn className="mb-12 text-center">
+      <section id="how-it-works" className="relative mx-auto max-w-5xl px-6 py-14 sm:px-10">
+        <FadeIn className="mb-8 text-center">
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-indigo-400">Process</p>
           <h2 className="text-3xl font-black sm:text-4xl">Get hired in 3 steps</h2>
         </FadeIn>
@@ -414,8 +414,8 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
       </section>
 
       {/* ── Testimonials ─────────────────────────────────────────────────── */}
-      <section className="relative mx-auto max-w-6xl px-6 py-24 sm:px-10">
-        <FadeIn className="mb-12 text-center">
+      <section className="relative mx-auto max-w-6xl px-6 py-14 sm:px-10">
+        <FadeIn className="mb-8 text-center">
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-indigo-400">Testimonials</p>
           <h2 className="text-3xl font-black sm:text-4xl">Loved by job seekers</h2>
         </FadeIn>
@@ -441,7 +441,7 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
       </section>
 
       {/* ── Pricing ──────────────────────────────────────────────────────── */}
-      <section id="pricing" className="relative mx-auto max-w-5xl px-6 py-24 sm:px-10">
+      <section id="pricing" className="relative mx-auto max-w-5xl px-6 py-14 sm:px-10">
         <FadeIn className="mb-4 text-center">
           <p className="mb-3 text-xs font-bold uppercase tracking-widest text-indigo-400">Pricing</p>
           <h2 className="mb-2 text-3xl font-black sm:text-4xl">Simple, transparent pricing</h2>
@@ -530,7 +530,7 @@ export default function Landing({ isAuthenticated, userName, onGoToApp }: Props)
             </div>
           </div>
           <div className="flex flex-col items-center justify-between gap-2 border-t border-slate-800 pt-6 text-xs text-slate-600 sm:flex-row">
-            <span>Built with ♥ and Claude AI by Srini · Bangalore, India</span>
+            <span>Built by Srini · Bangalore, India</span>
             <span>© 2026 ResumeIQ. All rights reserved.</span>
           </div>
         </div>
