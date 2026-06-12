@@ -541,10 +541,19 @@ rewrittenBullets = individual bullet strings (no bullet character) for experienc
       // If not, return [] so docx-generator falls through to parse rewrittenContent —
       // which IS the AI-rewritten text. Falling back to orig.bullets would silently
       // write original content into the DOCX while the UI shows rewritten prose.
+      // Education and certifications must NEVER get skills injected by Claude
+      // Strip any bullets Claude added beyond what was in the original
+      const isProtected = orig.type === "education" || orig.type === "certifications";
+      const safeBullets = isProtected
+        ? orig.bullets  // keep original bullets only, no AI additions
+        : (ai.rewrittenBullets?.length ? ai.rewrittenBullets : []);
+      const safeContent = isProtected
+        ? orig.originalContent  // preserve verbatim
+        : (ai.rewrittenContent ?? orig.originalContent);
       return {
         ...orig,
-        rewrittenContent: ai.rewrittenContent ?? orig.originalContent,
-        rewrittenBullets: ai.rewrittenBullets?.length ? ai.rewrittenBullets : [],
+        rewrittenContent: safeContent,
+        rewrittenBullets: safeBullets,
       };
     });
 
