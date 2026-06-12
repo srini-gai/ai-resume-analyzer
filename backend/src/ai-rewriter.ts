@@ -316,8 +316,8 @@ function rewriteSectionContent(
     return { ...section, rewrittenContent: merged.join(" • "), rewrittenBullets: merged };
   }
 
-  // education, certifications — preserve verbatim
-  return { ...section, rewrittenContent: section.originalContent };
+  // education, certifications — preserve verbatim, never inject skills
+  return { ...section, rewrittenContent: section.originalContent, rewrittenBullets: [] };
 }
 
 // ─── Candidate name extractor ─────────────────────────────────────────────────
@@ -367,7 +367,7 @@ function ruleBasedRewrite(
 
   const summary = summarySection?.rewrittenContent ?? "";
   const experienceBullets = expSection?.rewrittenBullets ?? [];
-  const skills = skillsSection?.rewrittenBullets.length ? skillsSection.rewrittenBullets : analysis.matchedSkills;
+  const skills = skillsSection?.rewrittenBullets.length ? skillsSection.rewrittenBullets : [];
   const fullRewrittenText = sections.map(s =>
     s.type === "header" ? s.originalContent : [s.originalTitle, s.rewrittenContent].join("\n")
   ).join("\n\n");
@@ -554,7 +554,7 @@ rewrittenBullets = individual bullet strings (no bullet character) for experienc
 
     const summary = summarySection?.rewrittenContent ?? "";
     const experienceBullets = expSection?.rewrittenBullets ?? [];
-    const skills = skillsSection?.rewrittenBullets.length ? skillsSection.rewrittenBullets : analysis.matchedSkills;
+    const skills = skillsSection?.rewrittenBullets.length ? skillsSection.rewrittenBullets : [];
     const fullRewrittenText = sections.map(s =>
       s.type === "header" ? s.originalContent : [s.originalTitle, s.rewrittenContent].join("\n")
     ).join("\n\n");
